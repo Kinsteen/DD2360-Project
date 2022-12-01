@@ -11,6 +11,9 @@ project ( RTWeekend
   LANGUAGES CUDA CXX
 )
 
+find_package(SFML COMPONENTS 
+    system window graphics network audio REQUIRED)
+
 # Set to c++11
 set ( CMAKE_CXX_STANDARD 11 )
 
@@ -37,5 +40,6 @@ set ( SOURCE_ONE_WEEKEND
 
 # Executables
 add_executable(inOneWeekend      ${SOURCE_ONE_WEEKEND})
+target_link_libraries(inOneWeekend PRIVATE sfml-graphics)
 
 include_directories(src/common)

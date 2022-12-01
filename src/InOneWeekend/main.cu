@@ -13,7 +13,9 @@
 #include <curand_kernel.h>
 #include <sys/time.h>
 
+#include <SFML/Graphics.hpp>
 #include <iostream>
+#include <mutex>
 #include <thread>
 
 #include "camera.h"
@@ -23,6 +25,10 @@
 #include "material.h"
 #include "rtweekend.h"
 #include "sphere.h"
+
+float3 *full_pixel_array;
+std::mutex m;
+int threadStarted = 0;
 
 double cpuSecond() {
     struct timeval tp;
@@ -114,6 +120,7 @@ class Tile {
     int y;
     int tile_size;
     int samples;
+    bool done = false;
 
     Tile(int x, int y, int tile_size, int samples);
     ~Tile();
@@ -136,8 +143,18 @@ Tile::~Tile() {
 }
 
 void Tile::render(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
-    // std::cerr << "Rendering tile (" << this->x << ", " << this->y << ")\n";
-    //  for (int j = this->y + size_y - 1; j >= this->y; --j) {
+    m.lock();
+    while (true) {
+        if (threadStarted < 8) {
+            threadStarted++;
+            m.unlock();
+            break;
+        } else {
+            m.unlock();
+            sf::sleep(sf::milliseconds(10));
+        }
+    }
+
     for (int j = this->y; j < this->y + tile_size; ++j) {
         for (int i = this->x; i < this->x + tile_size; ++i) {
             float3 pixel_color = make_float3(0, 0, 0);
@@ -155,60 +172,17 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
             this->pixel_array[array_idx] = pixel_color;
         }
     }
+
+    this->done = true;
+    m.lock();
+    threadStarted--;
+    m.unlock();
 }
 
 void Tile::renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
     std::thread thread(&Tile::render, this, image_width, image_height, cam, world, max_depth);
     this->thread = std::move(thread);
 }
-
-// __device__ inline double random_double_cuda(curandState *states) {
-//     int id = threadIdx.x + blockDim.x * blockIdx.x;
-//     // Returns a random real in [0,1).
-//     return curand_uniform(&states[id]);
-// }
-
-// __device__ uint3 ray_color_cuda(const ray &r, const hittable &world, int depth) {
-//     hit_record rec;
-
-//     // If we've exceeded the ray bounce limit, no more light is gathered.
-//     if (depth <= 0)
-//         return make_uint3(0, 0, 0);
-
-//     if (world.hit(r, 0.001, infinity, rec)) {
-//         ray scattered;
-//         uint3 attenuation;
-//         if (rec.mat_ptr->scatter(r, rec, attenuation, scattered))
-//             return attenuation * ray_color_cuda(scattered, world, depth - 1);
-//         return make_uint3(0, 0, 0);
-//     }
-
-//     vec3 unit_direction = unit_vector(r.direction());
-//     auto t = 0.5 * (unit_direction.y() + 1.0);
-//     return (1.0 - t) * make_uint3(1.0, 1.0, 1.0) + t * make_uint3(0.5, 0.7, 1.0);
-// }
-
-// __global__ void renderCUDA(int x, int y, int tile_size, int samples, int image_width, int image_height, camera cam, hittable_list world, int max_depth, curandState *states, uint3 *pixel_array) {
-//     int id = threadIdx.x + blockDim.x * blockIdx.x;
-//     int seed = id;                          // different seed per thread
-//     curand_init(seed, id, 0, &states[id]);  // 	Initialize CURAND
-
-//     for (int j = y; j < y + tile_size; ++j) {
-//         for (int i = x; i < x + tile_size; ++i) {
-//             uint3 pixel_color = make_uint3(0, 0, 0);
-//             for (int s = 0; s < samples; ++s) {
-//                 auto u = (i + random_double_cuda(states)) / (image_width - 1);
-//                 auto v = (j + random_double_cuda(states)) / (image_height - 1);
-//                 ray r = cam.get_ray(u, v);
-//                 pixel_color += ray_color_cuda(r, world, max_depth);
-//             }
-//             int tile_x = i - x;
-//             int tile_y = j - y;
-//             int array_idx = tile_x + tile_y * tile_size;
-//             pixel_array[array_idx] = pixel_color;
-//         }
-//     }
-// }
 
 void Tile::join() {
     this->thread.join();
@@ -223,9 +197,9 @@ __host__ int main() {
 
     // Image
     const auto aspect_ratio = 16.0 / 9.0;
-    const int image_width = 300;
+    const int image_width = 1200;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 15;
+    const int samples_per_pixel = 10;
     const int max_depth = 50;
     const int tile_size = 16;
 
@@ -249,10 +223,24 @@ __host__ int main() {
     curandState *dev_random;
     cudaMalloc((void **)&dev_random, NPB * TB * sizeof(curandState));
 
-    // Render
-    std::cout << "P3\n"
-              << image_width << ' ' << image_height << "\n255\n";
+    // Window setup
+    sf::RenderWindow window(sf::VideoMode(image_width, image_height), "Ray Tracing with CUDA",
+                            sf::Style::Titlebar | sf::Style::Close);
+    auto desktop = sf::VideoMode::getDesktopMode();
+    window.setPosition(sf::Vector2i(desktop.width / 2 - window.getSize().x / 2, desktop.height / 2 - window.getSize().y / 2));
+    sf::Texture tex;
+    sf::Sprite sprite;
 
+    if (!tex.create(image_width, image_height)) {
+        std::cerr << "Couldn't create texture!" << std::endl;
+        return 1;
+    }
+
+    tex.setSmooth(false);
+
+    sprite.setTexture(tex);
+
+    // Render
     int total_tiles_x = (int)std::ceil((double)image_width / (double)tile_size);
     int total_tiles_x_pixels = total_tiles_x * tile_size;
     int total_tiles_y = (int)std::ceil((double)image_height / (double)tile_size);
@@ -278,43 +266,85 @@ __host__ int main() {
         tiles[nb_tiles - 1 - i] = tile;
     }
 
-    for (auto &t : tiles) {
-        t->join();
-    }
+    full_pixel_array = (float3 *)malloc(image_width * image_height * sizeof(float3));
+    sf::Uint8 *pixel_array_sfml = (sf::Uint8 *)malloc(image_width * image_height * 4 * sizeof(sf::Uint8));
+    memset(pixel_array_sfml, 0, image_width * image_height * 4 * sizeof(sf::Uint8));
 
-    double iElaps = cpuSecond() - iStart;
+    bool renderFinished = false;
 
-    std::cerr << "Done render in " << iElaps << " seconds\n";
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) window.close();
+        }
 
-    iStart = cpuSecond();
+        tex.update(pixel_array_sfml);
 
-    float3 *full_pixel_array = (float3 *)malloc(image_width * image_height * sizeof(float3));
+        window.clear();
+        window.draw(sprite);
+        window.display();
+        // sf::sleep(sf::milliseconds(10));
 
-    for (int i = 0; i < nb_tiles; i++) {
-        Tile *t = tiles[i];
+        for (int i = 0; i < nb_tiles; i++) {
+            Tile *t = tiles[i];
 
-        int length = tile_size * tile_size;
-        // Index of final pixel array (size of final image)
-        int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
+            int length = tile_size * tile_size;
+            // Index of final pixel array (size of final image)
+            int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
 
-        float3 *pixels = t->getPixels();
+            float3 *pixels = t->getPixels();
 
-        for (int p = 0; p < length; p++) {
-            // bottom pixel line should go on top
-            int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
-            // Ditch pixels that were calculated but are out of the image
-            if (final_idx <= image_height * image_width && final_idx >= 0)
-                full_pixel_array[final_idx] = pixels[p];
+            for (int p = 0; p < length; p++) {
+                // bottom pixel line should go on top
+                int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
+                // Ditch pixels that were calculated but are out of the image
+                if (final_idx <= image_height * image_width && final_idx >= 0 && pixels[p].x != 0.f && pixels[p].y != 0.f && pixels[p].z != 0.f) {
+                    full_pixel_array[final_idx] = pixels[p];
+
+                    auto r = pixels[p].x;
+                    auto g = pixels[p].y;
+                    auto b = pixels[p].z;
+                    // Replace NaN components with zero. See explanation in Ray Tracing: The Rest of Your Life.
+                    if (r != r) r = 0.0;
+                    if (g != g) g = 0.0;
+                    if (b != b) b = 0.0;
+
+                    // Divide the color by the number of samples and gamma-correct for gamma=2.0.
+                    auto scale = 1.0 / samples_per_pixel;
+                    r = sqrt(scale * r);
+                    g = sqrt(scale * g);
+                    b = sqrt(scale * b);
+
+                    pixel_array_sfml[final_idx * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
+                    pixel_array_sfml[final_idx * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
+                    pixel_array_sfml[final_idx * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
+                    pixel_array_sfml[final_idx * 4 + 3] = 255u;
+                }
+            }
+        }
+
+        bool tempFinished = true;
+        for (auto &t : tiles) {
+            if (!t->done) {
+                tempFinished = false;
+                break;
+            }
+        }
+
+        if (tempFinished && !renderFinished) {
+            double iElaps = cpuSecond() - iStart;
+
+            std::cerr << "Done render in " << iElaps << " seconds\n";
+
+            tex.copyToImage().saveToFile("render.png");
+
+            renderFinished = true;
         }
     }
 
     // Read through the full pixel array to create the image
     // TODO: switch to png?
-    for (int i = 0; i < image_width * image_height; i++) {
-        write_color(std::cout, full_pixel_array[i], samples_per_pixel);
-    }
-
-    iElaps = cpuSecond() - iStart;
-
-    std::cerr << "Done reconstructing image in " << (iElaps) << "s.\n";
+    // for (int i = 0; i < image_width * image_height; i++) {
+    //     write_color(std::cout, full_pixel_array[i], samples_per_pixel);
+    // }
 }
