@@ -23,6 +23,7 @@ set ( COMMON_ALL
   src/common/camera.h
   src/common/ray.h
   src/common/vec3.h
+  src/common/cuda_utils.h
 )
 
 set ( SOURCE_ONE_WEEKEND

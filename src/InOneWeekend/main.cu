@@ -9,6 +9,8 @@
 // along with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 //==============================================================================================
 
+#include <curand.h>
+#include <curand_kernel.h>
 #include <sys/time.h>
 
 #include <iostream>
@@ -16,6 +18,7 @@
 
 #include "camera.h"
 #include "color.h"
+#include "cuda_utils.h"
 #include "hittable_list.h"
 #include "material.h"
 #include "rtweekend.h"
@@ -103,7 +106,7 @@ typedef struct
 
 class Tile {
    private:
-    color *pixel_array;
+    float3 *pixel_array;
     std::thread thread;
 
    public:
@@ -117,7 +120,7 @@ class Tile {
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
     void renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
     void join();
-    color *getPixels();
+    float3 *getPixels();
 };
 
 Tile::Tile(int x, int y, int tile_size, int samples) {
@@ -125,7 +128,7 @@ Tile::Tile(int x, int y, int tile_size, int samples) {
     this->y = y;
     this->tile_size = tile_size;
     this->samples = samples;
-    this->pixel_array = (color *)malloc(tile_size * tile_size * sizeof(color));
+    this->pixel_array = (float3 *)malloc(tile_size * tile_size * sizeof(float3));
 }
 
 Tile::~Tile() {
@@ -137,12 +140,14 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
     //  for (int j = this->y + size_y - 1; j >= this->y; --j) {
     for (int j = this->y; j < this->y + tile_size; ++j) {
         for (int i = this->x; i < this->x + tile_size; ++i) {
-            color pixel_color(0, 0, 0);
+            float3 pixel_color = make_float3(0, 0, 0);
             for (int s = 0; s < samples; ++s) {
                 auto u = (i + random_double()) / (image_width - 1);
                 auto v = (j + random_double()) / (image_height - 1);
                 ray r = cam.get_ray(u, v);
-                pixel_color += ray_color(r, world, max_depth);
+                color c = ray_color(r, world, max_depth);
+                float3 new_color = make_float3(c.x(), c.y(), c.z());
+                pixel_color += new_color;
             }
             int tile_x = i - this->x;
             int tile_y = j - this->y;
@@ -157,19 +162,67 @@ void Tile::renderThread(int image_width, int image_height, camera cam, hittable_
     this->thread = std::move(thread);
 }
 
+// __device__ inline double random_double_cuda(curandState *states) {
+//     int id = threadIdx.x + blockDim.x * blockIdx.x;
+//     // Returns a random real in [0,1).
+//     return curand_uniform(&states[id]);
+// }
+
+// __device__ uint3 ray_color_cuda(const ray &r, const hittable &world, int depth) {
+//     hit_record rec;
+
+//     // If we've exceeded the ray bounce limit, no more light is gathered.
+//     if (depth <= 0)
+//         return make_uint3(0, 0, 0);
+
+//     if (world.hit(r, 0.001, infinity, rec)) {
+//         ray scattered;
+//         uint3 attenuation;
+//         if (rec.mat_ptr->scatter(r, rec, attenuation, scattered))
+//             return attenuation * ray_color_cuda(scattered, world, depth - 1);
+//         return make_uint3(0, 0, 0);
+//     }
+
+//     vec3 unit_direction = unit_vector(r.direction());
+//     auto t = 0.5 * (unit_direction.y() + 1.0);
+//     return (1.0 - t) * make_uint3(1.0, 1.0, 1.0) + t * make_uint3(0.5, 0.7, 1.0);
+// }
+
+// __global__ void renderCUDA(int x, int y, int tile_size, int samples, int image_width, int image_height, camera cam, hittable_list world, int max_depth, curandState *states, uint3 *pixel_array) {
+//     int id = threadIdx.x + blockDim.x * blockIdx.x;
+//     int seed = id;                          // different seed per thread
+//     curand_init(seed, id, 0, &states[id]);  // 	Initialize CURAND
+
+//     for (int j = y; j < y + tile_size; ++j) {
+//         for (int i = x; i < x + tile_size; ++i) {
+//             uint3 pixel_color = make_uint3(0, 0, 0);
+//             for (int s = 0; s < samples; ++s) {
+//                 auto u = (i + random_double_cuda(states)) / (image_width - 1);
+//                 auto v = (j + random_double_cuda(states)) / (image_height - 1);
+//                 ray r = cam.get_ray(u, v);
+//                 pixel_color += ray_color_cuda(r, world, max_depth);
+//             }
+//             int tile_x = i - x;
+//             int tile_y = j - y;
+//             int array_idx = tile_x + tile_y * tile_size;
+//             pixel_array[array_idx] = pixel_color;
+//         }
+//     }
+// }
+
 void Tile::join() {
     this->thread.join();
 }
 
-color *Tile::getPixels() {
+float3 *Tile::getPixels() {
     return this->pixel_array;
 }
 
 __host__ int main() {
-    // Image
+    srand(time(NULL));
 
+    // Image
     const auto aspect_ratio = 16.0 / 9.0;
-    // const auto aspect_ratio = 1;
     const int image_width = 300;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 15;
@@ -179,11 +232,9 @@ __host__ int main() {
     std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
 
     // World
-
     auto world = random_scene();
 
     // Camera
-
     point3 lookfrom(13, 2, 3);
     point3 lookat(0, 0, 0);
     vec3 vup(0, 1, 0);
@@ -192,8 +243,13 @@ __host__ int main() {
 
     camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
 
-    // Render
+    // CUDA setup
+    int NPB = 32;
+    int TB = 32;
+    curandState *dev_random;
+    cudaMalloc((void **)&dev_random, NPB * TB * sizeof(curandState));
 
+    // Render
     std::cout << "P3\n"
               << image_width << ' ' << image_height << "\n255\n";
 
@@ -232,7 +288,7 @@ __host__ int main() {
 
     iStart = cpuSecond();
 
-    color *full_pixel_array = (color *)malloc(image_width * image_height * sizeof(color));
+    float3 *full_pixel_array = (float3 *)malloc(image_width * image_height * sizeof(float3));
 
     for (int i = 0; i < nb_tiles; i++) {
         Tile *t = tiles[i];
@@ -241,7 +297,7 @@ __host__ int main() {
         // Index of final pixel array (size of final image)
         int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
 
-        color *pixels = t->getPixels();
+        float3 *pixels = t->getPixels();
 
         for (int p = 0; p < length; p++) {
             // bottom pixel line should go on top
