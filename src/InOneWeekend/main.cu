@@ -100,23 +100,21 @@ class Tile {
    public:
     int x;
     int y;
-    int size_x;
-    int size_y;
+    int tile_size;
     int samples;
 
-    Tile(int x, int y, int size_x, int size_y, int samples);
+    Tile(int x, int y, int tile_size, int samples);
     ~Tile();
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
     color *getPixels();
 };
 
-Tile::Tile(int x, int y, int size_x, int size_y, int samples) {
+Tile::Tile(int x, int y, int tile_size, int samples) {
     this->x = x;
     this->y = y;
-    this->size_x = size_x;
-    this->size_y = size_y;
+    this->tile_size = tile_size;
     this->samples = samples;
-    this->pixel_array = (color *)malloc(size_x * size_y * sizeof(color));
+    this->pixel_array = (color *)malloc(tile_size * tile_size * sizeof(color));
 }
 
 Tile::~Tile() {
@@ -125,9 +123,9 @@ Tile::~Tile() {
 
 void Tile::render(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
     std::cerr << "Rendering tile (" << this->x << ", " << this->y << ")\n";
-    //for (int j = this->y + size_y - 1; j >= this->y; --j) {
-    for (int j = this->y; j < this->y + size_y; ++j) {
-        for (int i = this->x; i < this->x + size_x; ++i) {
+    // for (int j = this->y + size_y - 1; j >= this->y; --j) {
+    for (int j = this->y; j < this->y + tile_size; ++j) {
+        for (int i = this->x; i < this->x + tile_size; ++i) {
             color pixel_color(0, 0, 0);
             for (int s = 0; s < samples; ++s) {
                 auto u = (i + random_double()) / (image_width - 1);
@@ -137,7 +135,7 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
             }
             int tile_x = i - this->x;
             int tile_y = j - this->y;
-            int array_idx = tile_x + tile_y * size_y;
+            int array_idx = tile_x + tile_y * tile_size;
             this->pixel_array[array_idx] = pixel_color;
         }
     }
@@ -150,8 +148,8 @@ color *Tile::getPixels() {
 __host__ int main() {
     // Image
 
-    //const auto aspect_ratio = 16.0 / 9.0;
-    const auto aspect_ratio = 1;
+    const auto aspect_ratio = 16.0 / 9.0;
+    // const auto aspect_ratio = 1;
     const int image_width = 500;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 1;
@@ -178,12 +176,11 @@ __host__ int main() {
     std::cout << "P3\n"
               << image_width << ' ' << image_height << "\n255\n";
 
-    int size_x = 32;
-    int size_y = 32;
-    int total_tiles_x = (int) std::ceil((double) image_width / (double) size_x);
-    int total_tiles_x_pixels = total_tiles_x * size_x;
-    int total_tiles_y = (int) std::ceil((double) image_height / (double) size_y);
-    int total_tiles_y_pixels = total_tiles_y * size_y;
+    int tile_size = 32;
+    int total_tiles_x = (int)std::ceil((double)image_width / (double)tile_size);
+    int total_tiles_x_pixels = total_tiles_x * tile_size;
+    int total_tiles_y = (int)std::ceil((double)image_height / (double)tile_size);
+    int total_tiles_y_pixels = total_tiles_y * tile_size;
     int nb_tiles = total_tiles_x * total_tiles_y;
     std::cerr << "total_tiles_x: " << total_tiles_x << "\n";
     std::cerr << "total_tiles_y: " << total_tiles_y << "\n";
@@ -192,8 +189,8 @@ __host__ int main() {
 
     // Render each tile
     for (int i = nb_tiles - 1; i >= 0; i--) {
-        Tile *t = new Tile((i * size_x) % total_tiles_x_pixels, (i / (total_tiles_x)) * size_y, size_x, size_y, samples_per_pixel);
-        t->render(image_width, image_height, cam, world, max_depth);
+        Tile *t = new Tile((i * tile_size) % total_tiles_x_pixels, (i / (total_tiles_x)) * tile_size, tile_size, samples_per_pixel);
+        t->render(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
         tiles[nb_tiles - 1 - i] = t;
     }
 
@@ -205,13 +202,13 @@ __host__ int main() {
     for (int i = 0; i < nb_tiles; i++) {
         Tile *t = tiles[i];
 
-        // Tiles coordinates needs to be inverted (bottom row needs to go on top)
-        int length = size_x * size_y;
-        int start_idx = t->x + (image_width - size_y - t->y) * image_width;
+        int length = tile_size * tile_size;
+        // Index of final pixel array (size of final image)
+        int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
 
         for (int p = 0; p < length; p++) {
             // bottom pixel line should go on top
-            int final_idx = (start_idx + p % size_x) + (length-1 - p)/size_x * image_width;
+            int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
             // Ditch pixels that were calculated but are out of the image
             if (final_idx <= image_height * image_width && final_idx >= 0)
                 full_pixel_array[final_idx] = t->getPixels()[p];
