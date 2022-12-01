@@ -9,6 +9,8 @@
 // along with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 //==============================================================================================
 
+#include <sys/time.h>
+
 #include <iostream>
 #include <thread>
 
@@ -18,6 +20,12 @@
 #include "material.h"
 #include "rtweekend.h"
 #include "sphere.h"
+
+double cpuSecond() {
+    struct timeval tp;
+    gettimeofday(&tp, NULL);
+    return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
+}
 
 color ray_color(const ray &r, const hittable &world, int depth) {
     hit_record rec;
@@ -96,6 +104,7 @@ typedef struct
 class Tile {
    private:
     color *pixel_array;
+    std::thread thread;
 
    public:
     int x;
@@ -106,6 +115,8 @@ class Tile {
     Tile(int x, int y, int tile_size, int samples);
     ~Tile();
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
+    void renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
+    void join();
     color *getPixels();
 };
 
@@ -122,8 +133,8 @@ Tile::~Tile() {
 }
 
 void Tile::render(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
-    std::cerr << "Rendering tile (" << this->x << ", " << this->y << ")\n";
-    // for (int j = this->y + size_y - 1; j >= this->y; --j) {
+    // std::cerr << "Rendering tile (" << this->x << ", " << this->y << ")\n";
+    //  for (int j = this->y + size_y - 1; j >= this->y; --j) {
     for (int j = this->y; j < this->y + tile_size; ++j) {
         for (int i = this->x; i < this->x + tile_size; ++i) {
             color pixel_color(0, 0, 0);
@@ -141,6 +152,15 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
     }
 }
 
+void Tile::renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
+    std::thread thread(&Tile::render, this, image_width, image_height, cam, world, max_depth);
+    this->thread = std::move(thread);
+}
+
+void Tile::join() {
+    this->thread.join();
+}
+
 color *Tile::getPixels() {
     return this->pixel_array;
 }
@@ -150,10 +170,11 @@ __host__ int main() {
 
     const auto aspect_ratio = 16.0 / 9.0;
     // const auto aspect_ratio = 1;
-    const int image_width = 500;
+    const int image_width = 300;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 1;
+    const int samples_per_pixel = 15;
     const int max_depth = 50;
+    const int tile_size = 16;
 
     std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
 
@@ -176,7 +197,6 @@ __host__ int main() {
     std::cout << "P3\n"
               << image_width << ' ' << image_height << "\n255\n";
 
-    int tile_size = 32;
     int total_tiles_x = (int)std::ceil((double)image_width / (double)tile_size);
     int total_tiles_x_pixels = total_tiles_x * tile_size;
     int total_tiles_y = (int)std::ceil((double)image_height / (double)tile_size);
@@ -187,15 +207,30 @@ __host__ int main() {
     std::cerr << "Nb tile: " << nb_tiles << "\n";
     Tile *tiles[nb_tiles];
 
+    auto n_threads = std::thread::hardware_concurrency();
+    std::cerr << "Detected " << n_threads << " concurrent threads."
+              << "\n";
+    std::vector<std::thread> threads{n_threads};
+
+    double iStart = cpuSecond();
+
     // Render each tile
     for (int i = nb_tiles - 1; i >= 0; i--) {
-        Tile *t = new Tile((i * tile_size) % total_tiles_x_pixels, (i / (total_tiles_x)) * tile_size, tile_size, samples_per_pixel);
-        t->render(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
-        tiles[nb_tiles - 1 - i] = t;
+        Tile *tile = new Tile((i * tile_size) % total_tiles_x_pixels, (i / (total_tiles_x)) * tile_size, tile_size, samples_per_pixel);
+        // tile->render(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
+        tile->renderThread(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
+        tiles[nb_tiles - 1 - i] = tile;
     }
 
-    std::cerr << "Done render"
-              << "\n";
+    for (auto &t : tiles) {
+        t->join();
+    }
+
+    double iElaps = cpuSecond() - iStart;
+
+    std::cerr << "Done render in " << iElaps << " seconds\n";
+
+    iStart = cpuSecond();
 
     color *full_pixel_array = (color *)malloc(image_width * image_height * sizeof(color));
 
@@ -206,12 +241,14 @@ __host__ int main() {
         // Index of final pixel array (size of final image)
         int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
 
+        color *pixels = t->getPixels();
+
         for (int p = 0; p < length; p++) {
             // bottom pixel line should go on top
             int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
             // Ditch pixels that were calculated but are out of the image
             if (final_idx <= image_height * image_width && final_idx >= 0)
-                full_pixel_array[final_idx] = t->getPixels()[p];
+                full_pixel_array[final_idx] = pixels[p];
         }
     }
 
@@ -221,5 +258,7 @@ __host__ int main() {
         write_color(std::cout, full_pixel_array[i], samples_per_pixel);
     }
 
-    std::cerr << "\nDone reconstructing image.\n";
+    iElaps = cpuSecond() - iStart;
+
+    std::cerr << "Done reconstructing image in " << (iElaps) << "s.\n";
 }

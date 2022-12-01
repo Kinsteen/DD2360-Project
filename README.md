@@ -12,3 +12,7 @@ A class "Tile" will describe the result of the work. It would have:
 
 A code in the main thread will then combine those arrays into a single pixel array, to avoid concurrent writes to a single array.
 We could use mutex, but then the code will need to be rewritten to be ported to CUDA.
+
+### Results
+- Single threaded, 5 samples, 500x281: 25 seconds
+- Multi threaded, 5 samples, 500x281, 16 threads: 3.5 seconds (7 times faster)
