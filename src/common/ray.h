@@ -12,6 +12,7 @@
 //==============================================================================================
 
 #include "vec3.h"
+#include "cuda_utils.h"
 
 
 class ray {
@@ -36,6 +37,31 @@ class ray {
     public:
         point3 orig;
         vec3 dir;
+        double tm;
+};
+
+class ray_cuda {
+    public:
+        ray_cuda() {}
+        __host__ __device__ ray_cuda(const double3& origin, const double3& direction)
+            : orig(origin), dir(direction), tm(0)
+        {}
+
+        __host__ __device__ ray_cuda(const double3& origin, const double3& direction, double time)
+            : orig(origin), dir(direction), tm(time)
+        {}
+
+        __host__ __device__ double3 origin() const  { return orig; }
+        __host__ __device__ double3 direction() const { return dir; }
+        __host__ __device__ double time() const    { return tm; }
+
+        __host__ __device__ double3 at(double t) const {
+            return orig + t*dir;
+        }
+
+    public:
+        double3 orig;
+        double3 dir;
         double tm;
 };
 
