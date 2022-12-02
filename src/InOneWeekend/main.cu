@@ -105,7 +105,7 @@ hittable_list random_scene() {
 class Tile {
    private:
     int id;
-    float3 *pixel_array;
+    double4 *pixel_array;
     std::thread thread;
 
    public:
@@ -120,7 +120,7 @@ class Tile {
     ~Tile();
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
     void renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
-    float3 *getPixels();
+    double4 *getPixels();
 };
 Tile **tiles;
 
@@ -130,7 +130,7 @@ Tile::Tile(int id, int x, int y, int tile_size, int samples) {
     this->y = y;
     this->tile_size = tile_size;
     this->samples = samples;
-    this->pixel_array = (float3 *)malloc(tile_size * tile_size * sizeof(float3));
+    this->pixel_array = (double4 *)malloc(tile_size * tile_size * sizeof(double4));
 }
 
 Tile::~Tile() {
@@ -151,22 +151,22 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
     }
 
     started = true;
+    for (int s = 0; s < samples; ++s) {
+        for (int j = this->y; j < this->y + tile_size; ++j) {
+            for (int i = this->x; i < this->x + tile_size; ++i) {
+                int tile_x = i - this->x;
+                int tile_y = j - this->y;
+                int array_idx = tile_x + tile_y * tile_size;
 
-    for (int j = this->y; j < this->y + tile_size; ++j) {
-        for (int i = this->x; i < this->x + tile_size; ++i) {
-            float3 pixel_color = make_float3(0, 0, 0);
-            for (int s = 0; s < samples; ++s) {
+                double4 pixel_color = this->pixel_array[array_idx];
                 auto u = (i + random_double()) / (image_width - 1);
                 auto v = (j + random_double()) / (image_height - 1);
                 ray r = cam.get_ray(u, v);
                 color c = ray_color(r, world, max_depth);
-                float3 new_color = make_float3(c.x(), c.y(), c.z());
-                pixel_color += new_color;
+                double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
+                pixel_color = make_double4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
+                this->pixel_array[array_idx] = pixel_color;
             }
-            int tile_x = i - this->x;
-            int tile_y = j - this->y;
-            int array_idx = tile_x + tile_y * tile_size;
-            this->pixel_array[array_idx] = pixel_color;
         }
     }
 
@@ -181,8 +181,50 @@ void Tile::renderThread(int image_width, int image_height, camera cam, hittable_
     this->thread = std::move(thread);
 }
 
-float3 *Tile::getPixels() {
+double4 *Tile::getPixels() {
     return this->pixel_array;
+}
+
+void mergeTiles(sf::Uint8 *pixel_array, int nb_tiles, int tile_size, int image_height, int image_width, int samples) {
+    for (int i = 0; i < nb_tiles; i++) {
+        Tile *t = tiles[i];
+
+        if (!t->started) continue;  // If the tile hasn't started rendering it's doesn't make sense to try to merge it
+
+        int length = tile_size * tile_size;
+        // Index of final pixel array (size of final image)
+        int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
+
+        double4 *pixels = t->getPixels();
+
+        for (int p = 0; p < length; p++) {
+            // bottom pixel line should go on top
+            int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
+            // Ditch pixels that were calculated but are out of the image or if they're black
+            if (final_idx <= image_height * image_width && final_idx >= 0 && !(pixels[p] == 0.f)) {
+                auto r = pixels[p].x;
+                auto g = pixels[p].y;
+                auto b = pixels[p].z;
+                // Replace NaN components with zero. See explanation in Ray Tracing: The Rest of Your Life.
+                if (r != r) r = 0.0;
+                if (g != g) g = 0.0;
+                if (b != b) b = 0.0;
+
+                // Divide the color by the number of samples and gamma-correct for gamma=2.0.
+                if (pixels[p].w > 0) {
+                    auto scale = 1.0 / pixels[p].w;
+                    r = sqrt(scale * r);
+                    g = sqrt(scale * g);
+                    b = sqrt(scale * b);
+                }
+
+                pixel_array[final_idx * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
+                pixel_array[final_idx * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
+                pixel_array[final_idx * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
+                pixel_array[final_idx * 4 + 3] = 255u;
+            }
+        }
+    }
 }
 
 __host__ int main() {
@@ -190,11 +232,11 @@ __host__ int main() {
 
     // Image
     const auto aspect_ratio = 16.0 / 9.0;
-    const int image_width = 1000;
+    const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 10;
+    const int samples_per_pixel = 40;
     const int max_depth = 50;
-    const int tile_size = 16;
+    const int tile_size = 64;
 
     std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
 
@@ -247,11 +289,13 @@ __host__ int main() {
     double iStart = cpuSecond();
 
     // Render each tile
+    m.lock();
     for (int i = nb_tiles - 1; i >= 0; i--) {
         Tile *tile = new Tile(nb_tiles - 1 - i, (i * tile_size) % total_tiles_x_pixels, (i / (total_tiles_x)) * tile_size, tile_size, samples_per_pixel);
         tiles[nb_tiles - 1 - i] = tile;
         tile->renderThread(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
     }
+    m.unlock();
 
     sf::Uint8 *pixel_array_sfml = (sf::Uint8 *)malloc(image_width * image_height * 4 * sizeof(sf::Uint8));
     memset(pixel_array_sfml, 0, image_width * image_height * 4 * sizeof(sf::Uint8));
@@ -266,47 +310,18 @@ __host__ int main() {
             while (window.pollEvent(event)) {
                 if (event.type == sf::Event::Closed) window.close();
             }
+
+            mergeTiles(pixel_array_sfml, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
+
             tex.update(pixel_array_sfml);
 
             window.clear();
             window.draw(sprite);
             window.display();
 
-            for (int i = 0; i < nb_tiles; i++) {
-                Tile *t = tiles[i];
-
-                int length = tile_size * tile_size;
-                // Index of final pixel array (size of final image)
-                int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
-
-                float3 *pixels = t->getPixels();
-
-                for (int p = 0; p < length; p++) {
-                    // bottom pixel line should go on top
-                    int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
-                    // Ditch pixels that were calculated but are out of the image
-                    if (final_idx <= image_height * image_width && final_idx >= 0 && pixels[p].x != 0.f && pixels[p].y != 0.f && pixels[p].z != 0.f) {
-                        auto r = pixels[p].x;
-                        auto g = pixels[p].y;
-                        auto b = pixels[p].z;
-                        // Replace NaN components with zero. See explanation in Ray Tracing: The Rest of Your Life.
-                        if (r != r) r = 0.0;
-                        if (g != g) g = 0.0;
-                        if (b != b) b = 0.0;
-
-                        // Divide the color by the number of samples and gamma-correct for gamma=2.0.
-                        auto scale = 1.0 / samples_per_pixel;
-                        r = sqrt(scale * r);
-                        g = sqrt(scale * g);
-                        b = sqrt(scale * b);
-
-                        pixel_array_sfml[final_idx * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
-                        pixel_array_sfml[final_idx * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
-                        pixel_array_sfml[final_idx * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
-                        pixel_array_sfml[final_idx * 4 + 3] = 255u;
-                    }
-                }
-            }
+            // Sleep to not update too often
+            // Doesn't seem to change performance by much
+            sf::sleep(sf::milliseconds(100));
 
             bool tempFinished = true;
             for (int i = 0; i < nb_tiles; i++) {
@@ -321,6 +336,14 @@ __host__ int main() {
                 double iElaps = cpuSecond() - iStart;
 
                 std::cerr << "Done render in " << iElaps << " seconds\n";
+
+                // Merge one last time to be sure that the image is complete
+                mergeTiles(pixel_array_sfml, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
+                tex.update(pixel_array_sfml);
+
+                window.clear();
+                window.draw(sprite);
+                window.display();
 
                 tex.copyToImage().saveToFile("render.png");
 
