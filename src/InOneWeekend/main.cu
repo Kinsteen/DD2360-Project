@@ -14,6 +14,7 @@
 #include <sys/time.h>
 
 #include <SFML/Graphics.hpp>
+#include <chrono>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -26,7 +27,6 @@
 #include "rtweekend.h"
 #include "sphere.h"
 
-float3 *full_pixel_array;
 std::mutex m;
 int threadStarted = 0;
 
@@ -102,16 +102,9 @@ hittable_list random_scene() {
     return world;
 }
 
-typedef struct
-{
-    int r;
-    int g;
-    int b;
-    int a;
-} Pixel;
-
 class Tile {
    private:
+    int id;
     float3 *pixel_array;
     std::thread thread;
 
@@ -121,16 +114,18 @@ class Tile {
     int tile_size;
     int samples;
     bool done = false;
+    bool started = false;
 
-    Tile(int x, int y, int tile_size, int samples);
+    Tile(int id, int x, int y, int tile_size, int samples);
     ~Tile();
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
     void renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
-    void join();
     float3 *getPixels();
 };
+Tile **tiles;
 
-Tile::Tile(int x, int y, int tile_size, int samples) {
+Tile::Tile(int id, int x, int y, int tile_size, int samples) {
+    this->id = id;
     this->x = x;
     this->y = y;
     this->tile_size = tile_size;
@@ -145,15 +140,17 @@ Tile::~Tile() {
 void Tile::render(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
     m.lock();
     while (true) {
-        if (threadStarted < 8) {
+        if (threadStarted < 16 && ((tiles[id + 1] != NULL && tiles[id + 1]->started) || (x == 0 && y == 0))) {
             threadStarted++;
             m.unlock();
             break;
         } else {
             m.unlock();
-            sf::sleep(sf::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
     }
+
+    started = true;
 
     for (int j = this->y; j < this->y + tile_size; ++j) {
         for (int i = this->x; i < this->x + tile_size; ++i) {
@@ -184,10 +181,6 @@ void Tile::renderThread(int image_width, int image_height, camera cam, hittable_
     this->thread = std::move(thread);
 }
 
-void Tile::join() {
-    this->thread.join();
-}
-
 float3 *Tile::getPixels() {
     return this->pixel_array;
 }
@@ -197,7 +190,7 @@ __host__ int main() {
 
     // Image
     const auto aspect_ratio = 16.0 / 9.0;
-    const int image_width = 1200;
+    const int image_width = 1000;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 10;
     const int max_depth = 50;
@@ -249,102 +242,93 @@ __host__ int main() {
     std::cerr << "total_tiles_x: " << total_tiles_x << "\n";
     std::cerr << "total_tiles_y: " << total_tiles_y << "\n";
     std::cerr << "Nb tile: " << nb_tiles << "\n";
-    Tile *tiles[nb_tiles];
-
-    auto n_threads = std::thread::hardware_concurrency();
-    std::cerr << "Detected " << n_threads << " concurrent threads."
-              << "\n";
-    std::vector<std::thread> threads{n_threads};
+    tiles = (Tile **)malloc(nb_tiles * sizeof(Tile *));
 
     double iStart = cpuSecond();
 
     // Render each tile
     for (int i = nb_tiles - 1; i >= 0; i--) {
-        Tile *tile = new Tile((i * tile_size) % total_tiles_x_pixels, (i / (total_tiles_x)) * tile_size, tile_size, samples_per_pixel);
-        // tile->render(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
-        tile->renderThread(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
+        Tile *tile = new Tile(nb_tiles - 1 - i, (i * tile_size) % total_tiles_x_pixels, (i / (total_tiles_x)) * tile_size, tile_size, samples_per_pixel);
         tiles[nb_tiles - 1 - i] = tile;
+        tile->renderThread(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
     }
 
-    full_pixel_array = (float3 *)malloc(image_width * image_height * sizeof(float3));
     sf::Uint8 *pixel_array_sfml = (sf::Uint8 *)malloc(image_width * image_height * 4 * sizeof(sf::Uint8));
     memset(pixel_array_sfml, 0, image_width * image_height * 4 * sizeof(sf::Uint8));
+    tex.update(pixel_array_sfml);
 
     bool renderFinished = false;
 
     while (window.isOpen()) {
         sf::Event event;
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) window.close();
-        }
 
-        tex.update(pixel_array_sfml);
+        if (!renderFinished) {
+            while (window.pollEvent(event)) {
+                if (event.type == sf::Event::Closed) window.close();
+            }
+            tex.update(pixel_array_sfml);
 
-        window.clear();
-        window.draw(sprite);
-        window.display();
-        // sf::sleep(sf::milliseconds(10));
+            window.clear();
+            window.draw(sprite);
+            window.display();
 
-        for (int i = 0; i < nb_tiles; i++) {
-            Tile *t = tiles[i];
+            for (int i = 0; i < nb_tiles; i++) {
+                Tile *t = tiles[i];
 
-            int length = tile_size * tile_size;
-            // Index of final pixel array (size of final image)
-            int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
+                int length = tile_size * tile_size;
+                // Index of final pixel array (size of final image)
+                int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
 
-            float3 *pixels = t->getPixels();
+                float3 *pixels = t->getPixels();
 
-            for (int p = 0; p < length; p++) {
-                // bottom pixel line should go on top
-                int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
-                // Ditch pixels that were calculated but are out of the image
-                if (final_idx <= image_height * image_width && final_idx >= 0 && pixels[p].x != 0.f && pixels[p].y != 0.f && pixels[p].z != 0.f) {
-                    full_pixel_array[final_idx] = pixels[p];
+                for (int p = 0; p < length; p++) {
+                    // bottom pixel line should go on top
+                    int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
+                    // Ditch pixels that were calculated but are out of the image
+                    if (final_idx <= image_height * image_width && final_idx >= 0 && pixels[p].x != 0.f && pixels[p].y != 0.f && pixels[p].z != 0.f) {
+                        auto r = pixels[p].x;
+                        auto g = pixels[p].y;
+                        auto b = pixels[p].z;
+                        // Replace NaN components with zero. See explanation in Ray Tracing: The Rest of Your Life.
+                        if (r != r) r = 0.0;
+                        if (g != g) g = 0.0;
+                        if (b != b) b = 0.0;
 
-                    auto r = pixels[p].x;
-                    auto g = pixels[p].y;
-                    auto b = pixels[p].z;
-                    // Replace NaN components with zero. See explanation in Ray Tracing: The Rest of Your Life.
-                    if (r != r) r = 0.0;
-                    if (g != g) g = 0.0;
-                    if (b != b) b = 0.0;
+                        // Divide the color by the number of samples and gamma-correct for gamma=2.0.
+                        auto scale = 1.0 / samples_per_pixel;
+                        r = sqrt(scale * r);
+                        g = sqrt(scale * g);
+                        b = sqrt(scale * b);
 
-                    // Divide the color by the number of samples and gamma-correct for gamma=2.0.
-                    auto scale = 1.0 / samples_per_pixel;
-                    r = sqrt(scale * r);
-                    g = sqrt(scale * g);
-                    b = sqrt(scale * b);
-
-                    pixel_array_sfml[final_idx * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
-                    pixel_array_sfml[final_idx * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
-                    pixel_array_sfml[final_idx * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
-                    pixel_array_sfml[final_idx * 4 + 3] = 255u;
+                        pixel_array_sfml[final_idx * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
+                        pixel_array_sfml[final_idx * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
+                        pixel_array_sfml[final_idx * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
+                        pixel_array_sfml[final_idx * 4 + 3] = 255u;
+                    }
                 }
             }
-        }
 
-        bool tempFinished = true;
-        for (auto &t : tiles) {
-            if (!t->done) {
-                tempFinished = false;
-                break;
+            bool tempFinished = true;
+            for (int i = 0; i < nb_tiles; i++) {
+                Tile *t = tiles[i];
+                if (!t->done) {
+                    tempFinished = false;
+                    break;
+                }
             }
-        }
 
-        if (tempFinished && !renderFinished) {
-            double iElaps = cpuSecond() - iStart;
+            if (tempFinished) {
+                double iElaps = cpuSecond() - iStart;
 
-            std::cerr << "Done render in " << iElaps << " seconds\n";
+                std::cerr << "Done render in " << iElaps << " seconds\n";
 
-            tex.copyToImage().saveToFile("render.png");
+                tex.copyToImage().saveToFile("render.png");
 
-            renderFinished = true;
+                renderFinished = true;
+            }
+        } else {
+            window.waitEvent(event);
+            if (event.type == sf::Event::Closed) window.close();
         }
     }
-
-    // Read through the full pixel array to create the image
-    // TODO: switch to png?
-    // for (int i = 0; i < image_width * image_height; i++) {
-    //     write_color(std::cout, full_pixel_array[i], samples_per_pixel);
-    // }
 }
