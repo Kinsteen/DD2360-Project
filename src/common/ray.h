@@ -17,20 +17,20 @@
 
 class ray {
     public:
-        ray() {}
-        ray(const point3& origin, const vec3& direction)
+        __host__ ray() {}
+        __host__ ray(const point3& origin, const vec3& direction)
             : orig(origin), dir(direction), tm(0)
         {}
 
-        ray(const point3& origin, const vec3& direction, double time)
+        __host__ ray(const point3& origin, const vec3& direction, double time)
             : orig(origin), dir(direction), tm(time)
         {}
 
-        point3 origin() const  { return orig; }
-        vec3 direction() const { return dir; }
-        double time() const    { return tm; }
+        __host__ point3 origin() const  { return orig; }
+        __host__ vec3 direction() const { return dir; }
+        __host__ double time() const    { return tm; }
 
-        point3 at(double t) const {
+        __host__ point3 at(double t) const {
             return orig + t*dir;
         }
 
@@ -43,19 +43,19 @@ class ray {
 class ray_cuda {
     public:
         ray_cuda() {}
-        __host__ __device__ ray_cuda(const double3& origin, const double3& direction)
+        __host__ ray_cuda(const double3& origin, const double3& direction)
             : orig(origin), dir(direction), tm(0)
         {}
 
-        __host__ __device__ ray_cuda(const double3& origin, const double3& direction, double time)
+        __host__ ray_cuda(const double3& origin, const double3& direction, double time)
             : orig(origin), dir(direction), tm(time)
         {}
 
-        __host__ __device__ double3 origin() const  { return orig; }
-        __host__ __device__ double3 direction() const { return dir; }
-        __host__ __device__ double time() const    { return tm; }
+        __host__ double3 origin() const  { return orig; }
+        __host__ double3 direction() const { return dir; }
+        __host__ double time() const    { return tm; }
 
-        __host__ __device__ double3 at(double t) const {
+        __host__ double3 at(double t) const {
             return orig + t*dir;
         }
 

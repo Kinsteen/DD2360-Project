@@ -36,6 +36,7 @@ double cpuSecond() {
     return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
 }
 
+__host__
 color ray_color(const ray &r, const hittable &world, int depth) {
     hit_record rec;
 
@@ -56,17 +57,13 @@ color ray_color(const ray &r, const hittable &world, int depth) {
     return (1.0 - t) * color(1.0, 1.0, 1.0) + t * color(0.5, 0.7, 1.0);
 }
 
-double3 ray_color_cuda(const ray_cuda &r) {
-    double3 unit_direction = normalize(r.direction());
-    auto t = 0.5*(unit_direction.y + 1.0);
-    return (1.0-t)*make_double3(1.0, 1.0, 1.0) + t*make_double3(0.5, 0.7, 1.0);
-}
-
+__host__
 hittable_list random_scene() {
     hittable_list world;
+    std::vector<hittable*> objects;
 
-    auto ground_material = make_shared<lambertian>(color(0.5, 0.5, 0.5));
-    world.add(make_shared<sphere>(point3(0, -1000, 0), 1000, ground_material));
+    auto ground_material = new lambertian(color(0.5, 0.5, 0.5));
+    objects.push_back(new sphere(point3(0, -1000, 0), 1000, ground_material));
 
     for (int a = -11; a < 11; a++) {
         for (int b = -11; b < 11; b++) {
@@ -74,38 +71,49 @@ hittable_list random_scene() {
             point3 center(a + 0.9 * random_double(), 0.2, b + 0.9 * random_double());
 
             if ((center - point3(4, 0.2, 0)).length() > 0.9) {
-                shared_ptr<material> sphere_material;
+                material* sphere_material;
 
                 if (choose_mat < 0.8) {
                     // diffuse
                     auto albedo = color::random() * color::random();
-                    sphere_material = make_shared<lambertian>(albedo);
-                    world.add(make_shared<sphere>(center, 0.2, sphere_material));
+                    sphere_material = new lambertian(albedo);
+                    objects.push_back(new sphere(center, 0.2, sphere_material));
                 } else if (choose_mat < 0.95) {
                     // metal
                     auto albedo = color::random(0.5, 1);
                     auto fuzz = random_double(0, 0.5);
-                    sphere_material = make_shared<metal>(albedo, fuzz);
-                    world.add(make_shared<sphere>(center, 0.2, sphere_material));
+                    sphere_material = new metal(albedo, fuzz);
+                    objects.push_back(new sphere(center, 0.2, sphere_material));
                 } else {
                     // glass
-                    sphere_material = make_shared<dielectric>(1.5);
-                    world.add(make_shared<sphere>(center, 0.2, sphere_material));
+                    sphere_material = new dielectric(1.5);
+                    objects.push_back(new sphere(center, 0.2, sphere_material));
                 }
             }
         }
     }
 
-    auto material1 = make_shared<dielectric>(1.5);
-    world.add(make_shared<sphere>(point3(0, 1, 0), 1.0, material1));
+    auto material1 = new dielectric(1.5);
+    objects.push_back(new sphere(point3(0, 1, 0), 1.0, material1));
 
-    auto material2 = make_shared<lambertian>(color(0.4, 0.2, 0.1));
-    world.add(make_shared<sphere>(point3(-4, 1, 0), 1.0, material2));
+    auto material2 = new lambertian(color(0.4, 0.2, 0.1));
+    objects.push_back(new sphere(point3(-4, 1, 0), 1.0, material2));
 
-    auto material3 = make_shared<metal>(color(0.7, 0.6, 0.5), 0.0);
-    world.add(make_shared<sphere>(point3(4, 1, 0), 1.0, material3));
+    auto material3 = new metal(color(0.7, 0.6, 0.5), 0.0);
+    objects.push_back(new sphere(point3(4, 1, 0), 1.0, material3));
 
-    return world;
+    hittable** objects_array = (hittable**)malloc(objects.size() * sizeof(hittable*));
+
+    int i = 0;
+    for (auto obj : objects) {
+        objects_array[i] = obj;
+        i++;
+    }
+        std::cerr << "Pushed "<< i << " objects" << std::endl;
+
+    hittable_list world_array(objects_array, i);
+
+    return world_array;
 }
 
 class Tile {
@@ -188,6 +196,23 @@ void Tile::renderThread(int image_width, int image_height, camera cam, hittable_
     this->thread = std::move(thread);
 }
 
+// __global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera &cam, hittable_list world, int max_depth) {
+//     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+//     const int j = blockIdx.y * blockDim.y + threadIdx.y;
+//     const int id = i + j * blockIdx.y * blockDim.y;
+
+//     for (int s = 0; s < samples; ++s) {
+//         double4 pixel_color = pixels[i + j * image_width];
+//         auto u = (i + random_double()) / (image_width - 1);
+//         auto v = (j + random_double()) / (image_height - 1);
+//         ray r = cam.get_ray(u, v);
+//         color c = ray_color(r, world, max_depth);
+//         double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
+//         pixel_color = make_double4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
+//         pixels[i + j * image_width] = pixel_color;
+//     }
+// }
+
 double4 *Tile::getPixels() {
     return this->pixel_array;
 }
@@ -235,8 +260,8 @@ __host__ int main() {
     const auto aspect_ratio = 16.0 / 9.0;
     const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 50;  // 3 samples is the minimum to have a correct contrast / colors
-    const int max_depth = 30;
+    const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
+    const int max_depth = 50;
     const int tile_size = 32;
 
     // World
