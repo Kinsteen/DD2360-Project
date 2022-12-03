@@ -11,29 +11,29 @@
 // along with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 //==============================================================================================
 
-#include "rtweekend.h"
-
-#include "hittable.h"
-
 #include <memory>
 #include <vector>
 
+#include "hittable.h"
+#include "rtweekend.h"
 
-class hittable_list : public hittable  {
-    public:
-        hittable_list() {}
-        hittable_list(hittable** objects, int size) { objects_array = objects; this->size = size;}
+class hittable_list : public hittable {
+   public:
+    hittable_list() {}
+    hittable_list(hittable** objects, int size) {
+        objects_array = objects;
+        this->size = size;
+    }
 
-        virtual bool hit(
-            const ray& r, double t_min, double t_max, hit_record& rec) const override;
+    __host__ __device__ virtual bool hit(
+        const ray& r, double t_min, double t_max, hit_record& rec) const override;
 
-    public:
-        hittable** objects_array;
-        int size;
+   public:
+    hittable** objects_array;
+    int size;
 };
 
-
-bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+__host__ __device__ bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
     hit_record temp_rec;
     auto hit_anything = false;
     auto closest_so_far = t_max;
@@ -49,6 +49,5 @@ bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& re
 
     return hit_anything;
 }
-
 
 #endif

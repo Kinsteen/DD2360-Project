@@ -36,8 +36,9 @@ double cpuSecond() {
     return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
 }
 
-__host__
-color ray_color(const ray &r, const hittable &world, int depth) {
+__host__ __device__
+    color
+    ray_color(const ray &r, const hittable &world, int depth) {
     hit_record rec;
 
     // If we've exceeded the ray bounce limit, no more light is gathered.
@@ -58,9 +59,10 @@ color ray_color(const ray &r, const hittable &world, int depth) {
 }
 
 __host__
-hittable_list random_scene() {
+    hittable_list
+    random_scene() {
     hittable_list world;
-    std::vector<hittable*> objects;
+    std::vector<hittable *> objects;
 
     auto ground_material = new lambertian(color(0.5, 0.5, 0.5));
     objects.push_back(new sphere(point3(0, -1000, 0), 1000, ground_material));
@@ -71,7 +73,7 @@ hittable_list random_scene() {
             point3 center(a + 0.9 * random_double(), 0.2, b + 0.9 * random_double());
 
             if ((center - point3(4, 0.2, 0)).length() > 0.9) {
-                material* sphere_material;
+                material *sphere_material;
 
                 if (choose_mat < 0.8) {
                     // diffuse
@@ -102,14 +104,14 @@ hittable_list random_scene() {
     auto material3 = new metal(color(0.7, 0.6, 0.5), 0.0);
     objects.push_back(new sphere(point3(4, 1, 0), 1.0, material3));
 
-    hittable** objects_array = (hittable**)malloc(objects.size() * sizeof(hittable*));
+    hittable **objects_array = (hittable **)malloc(objects.size() * sizeof(hittable *));
 
     int i = 0;
     for (auto obj : objects) {
         objects_array[i] = obj;
         i++;
     }
-        std::cerr << "Pushed "<< i << " objects" << std::endl;
+    std::cerr << "Pushed " << i << " objects" << std::endl;
 
     hittable_list world_array(objects_array, i);
 
@@ -196,22 +198,26 @@ void Tile::renderThread(int image_width, int image_height, camera cam, hittable_
     this->thread = std::move(thread);
 }
 
-// __global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera &cam, hittable_list world, int max_depth) {
-//     const int i = blockIdx.x * blockDim.x + threadIdx.x;
-//     const int j = blockIdx.y * blockDim.y + threadIdx.y;
-//     const int id = i + j * blockIdx.y * blockDim.y;
+__global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list *world, int max_depth) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int j = blockIdx.y * blockDim.y + threadIdx.y;
+    // const int id = i + j * blockIdx.y * blockDim.y;
 
-//     for (int s = 0; s < samples; ++s) {
-//         double4 pixel_color = pixels[i + j * image_width];
-//         auto u = (i + random_double()) / (image_width - 1);
-//         auto v = (j + random_double()) / (image_height - 1);
-//         ray r = cam.get_ray(u, v);
-//         color c = ray_color(r, world, max_depth);
-//         double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
-//         pixel_color = make_double4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
-//         pixels[i + j * image_width] = pixel_color;
-//     }
-// }
+    hittable_list temp_world = *world;
+
+    if (i < image_width && j < image_height) {
+        for (int s = 0; s < samples; ++s) {
+            double4 pixel_color = pixels[i + j * image_width];
+            auto u = (i + random_double()) / (image_width - 1);
+            auto v = (j + random_double()) / (image_height - 1);
+            ray r = cam->get_ray(u, v);
+            color c = ray_color(r, temp_world, max_depth);
+            double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
+            pixel_color = make_double4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
+            pixels[i + j * image_width] = pixel_color;
+        }
+    }
+}
 
 double4 *Tile::getPixels() {
     return this->pixel_array;
@@ -257,8 +263,8 @@ __host__ int main() {
     srand(time(NULL));
 
     // Image
-    const auto aspect_ratio = 16.0 / 9.0;
-    const int image_width = 1280;
+    const auto aspect_ratio = 1;
+    const int image_width = 320;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 50;
@@ -275,12 +281,6 @@ __host__ int main() {
     auto aperture = 0.1;
 
     camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
-
-    // CUDA setup
-    int NPB = 32;
-    int TB = 32;
-    curandState *dev_random;
-    cudaMalloc((void **)&dev_random, NPB * TB * sizeof(curandState));
 
     // Window setup
     sf::RenderWindow window(sf::VideoMode(image_width, image_height), "Ray Tracing with CUDA",
@@ -325,6 +325,39 @@ __host__ int main() {
     }
     m.unlock();
 
+    // int grid_height = 16;
+    // int grid_width = grid_height;
+    // int grid_x = ceil(image_width / (double)grid_width) + 1;
+    // int grid_y = ceil(image_height / (double)grid_height) + 1;
+
+    // size_t array_size = grid_x * grid_y * grid_width * grid_height * sizeof(double4);
+
+    // printf("grid_x %d / grid_y %d\n", grid_x, grid_y);
+
+    // double4 *pixels;
+    // cudaMalloc(&pixels, array_size);
+
+    // double4 *pixels_host = (double4 *)malloc(array_size);
+    // memset(pixels_host, 0, array_size);
+
+    // camera *dev_cam;
+    // printf("cudaMalloc %d\n", cudaMalloc(&dev_cam, sizeof(cam)));
+    // printf("cudaMemcpy %d\n", cudaMemcpy(dev_cam, &cam, sizeof(cam), cudaMemcpyHostToDevice));
+
+    // hittable_list *dev_world;
+    // printf("cudaMalloc %d\n", cudaMalloc(&dev_world, sizeof(hittable_list)));
+    // printf("cudaMemcpy %d\n", cudaMemcpy(dev_world, &world, sizeof(hittable_list), cudaMemcpyHostToDevice));
+
+    // curandState *curandStates = NULL;
+    // cudaMalloc(&curandStates, grid_x * grid_y * grid_width * grid_height * sizeof(curandState));
+    // init_random_cuda<<<1, 1>>>(curandStates);
+
+    // printf("%d\n", cudaDeviceSynchronize());
+    // //renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
+    // renderCuda<<<1, 1>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
+
+    // printf("device sync %d\n", cudaDeviceSynchronize());
+    // exit(0);
     sf::Uint8 *pixel_array_sfml = (sf::Uint8 *)malloc(image_width * image_height * 4 * sizeof(sf::Uint8));
     memset(pixel_array_sfml, 0, image_width * image_height * 4 * sizeof(sf::Uint8));
     tex.update(pixel_array_sfml);

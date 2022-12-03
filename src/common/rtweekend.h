@@ -14,6 +14,7 @@
 #include <limits>
 #include <memory>
 
+#include "cuda_utils.h"
 
 // Usings
 
@@ -28,31 +29,42 @@ const double pi = 3.1415926535897932385;
 
 // Utility Functions
 
-__host__
+__host__ __device__
 inline double degrees_to_radians(double degrees) {
     return degrees * pi / 180.0;
 }
 
-__host__
+__host__ __device__
 inline double clamp(double x, double min, double max) {
     if (x < min) return min;
     if (x > max) return max;
     return x;
 }
 
-__host__
-inline double random_double() {
-    // Returns a random real in [0,1).
-    return rand() / (RAND_MAX + 1.0);
+__global__ void init_random_cuda(curandState *states) {
+    // Set the device pointer to the new pointer set
+    dev_states = states;
+    int idx = threadIdx.x+blockDim.x*blockIdx.x;
+    curand_init(1234, idx, 0, &dev_states[idx]);
 }
 
-__host__
+__host__ __device__
+inline double random_double() {
+    // Returns a random real in [0,1).
+    #ifdef __CUDA_ARCH__
+        return curand_uniform(dev_states);
+    #else
+        return rand() / (RAND_MAX + 1.0);
+    #endif
+}
+
+__host__ __device__
 inline double random_double(double min, double max) {
     // Returns a random real in [min,max).
     return min + (max-min)*random_double();
 }
 
-__host__
+__host__ __device__
 inline int random_int(int min, int max) {
     // Returns a random integer in [min,max].
     return static_cast<int>(random_double(min, max+1));

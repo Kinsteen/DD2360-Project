@@ -19,7 +19,7 @@ struct hit_record;
 
 class material {
     public:
-        __host__ virtual bool scatter(
+        __host__ __device__ virtual bool scatter(
             const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
         ) const = 0;
 };
@@ -29,7 +29,7 @@ class lambertian : public material {
     public:
         lambertian(const color& a) : albedo(a) {}
 
-        __host__ virtual bool scatter(
+        __host__ __device__ virtual bool scatter(
             const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
         ) const override {
             auto scatter_direction = rec.normal + random_unit_vector();
@@ -52,7 +52,7 @@ class metal : public material {
     public:
         metal(const color& a, double f) : albedo(a), fuzz(f < 1 ? f : 1) {}
 
-        __host__ virtual bool scatter(
+        __host__ __device__ virtual bool scatter(
             const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
         ) const override {
             vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
@@ -71,7 +71,7 @@ class dielectric : public material {
     public:
         dielectric(double index_of_refraction) : ir(index_of_refraction) {}
 
-        __host__ virtual bool scatter(
+        __host__ __device__ virtual bool scatter(
             const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
         ) const override {
             attenuation = color(1.0, 1.0, 1.0);
@@ -97,7 +97,7 @@ class dielectric : public material {
         double ir; // Index of Refraction
 
     private:
-        __host__ static double reflectance(double cosine, double ref_idx) {
+        __host__ __device__ static double reflectance(double cosine, double ref_idx) {
             // Use Schlick's approximation for reflectance.
             auto r0 = (1-ref_idx) / (1+ref_idx);
             r0 = r0*r0;

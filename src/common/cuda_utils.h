@@ -1,6 +1,8 @@
 #ifndef CUDA_UTILS_H
 #define CUDA_UTILS_H
 
+__device__ curandState* dev_states;
+
 inline __host__ __device__ void operator+=(double3 &a, double3 b)
 {
     a.x += b.x;
