@@ -24,3 +24,4 @@ The merging code works pretty well, but readability could be improved and perfor
 ### Results
 - Single threaded, 5 samples, 500x281: 25 seconds
 - Multi threaded, 5 samples, 500x281, 16 threads: 3.5 seconds (7 times faster)
+- CUDA, 5 samples, 500x281: 1.31773 seconds (19 times faster than single thread CPU)

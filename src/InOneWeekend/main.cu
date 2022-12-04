@@ -115,10 +115,12 @@ __host__
 // We can't generate the scene on host because of the use of virtual functions in the hittable objects.
 // We need to do everything on the GPU
 // This function takes a pointer to a world, and the GPU will create all objects in the scene
-__global__ void random_scene_kernel(hittable_list **world, hittable **objects_array) {
+__global__ void random_scene_kernel(hittable_list **world, hittable **objects_array, int image_width, int image_height) {
     // hittable *objects_array[500];
     // cudaMalloc(&objects_array, sizeof(hittable*) * 5000);
     //  this doesn't work for some reason???
+    dev_image_height = image_height;
+    dev_image_width = image_width;
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -165,10 +167,7 @@ __global__ void random_scene_kernel(hittable_list **world, hittable **objects_ar
         auto material3 = new metal(color(0.7, 0.6, 0.5), 0.0);
         objects_array[idx++] = new sphere(point3(4, 1, 0), 1.0, material3);
 
-        // std::cerr << "Pushed " << idx << " objects" << std::endl;
-
         *world = new hittable_list(objects_array, idx);
-        printf("world ptr 1st obj %p\n", (*world)->objects_array[0]);
     }
 }
 
@@ -257,31 +256,6 @@ double4 *Tile::getPixels() {
     return this->pixel_array;
 }
 
-__global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j = blockIdx.y * blockDim.y + threadIdx.y;
-    // const int id = i + j * blockIdx.y * blockDim.y;
-
-    hittable_list temp_world = **world_ptr;
-
-    if (i < image_width && j < image_height) {
-        double4 pixel_color = make_double4(0, 0, 0, 0);
-        for (int s = 1; s <= samples; ++s) {
-            auto u = (i + random_double()) / (image_width - 1);
-            auto v = (j + random_double()) / (image_height - 1);
-            ray r = cam->get_ray(u, v);
-            color c = ray_color(r, temp_world, max_depth);
-            double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
-            pixel_color = make_double4(
-                c.x() + pixel_color.x,
-                c.y() + pixel_color.y,
-                c.z() + pixel_color.z,
-                s);
-            pixels[i + j * image_width] = pixel_color;
-        }
-    }
-}
-
 void mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_size, int image_height, int image_width, int samples) {
     for (int i = 0; i < nb_tiles; i++) {
         Tile *t = tiles[i];
@@ -318,34 +292,65 @@ void mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_siz
     }
 }
 
-void convertPixels(double4 *gpuPixels, sf::Uint8 *sfml_pixels, int image_width, int image_height) {
+__global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int j = blockIdx.y * blockDim.y + threadIdx.y;
+    // const int id = i + j * blockIdx.y * blockDim.y;
+
+    hittable_list temp_world = **world_ptr;
+
+    if (i < image_width && j < image_height) {
+        double4 pixel_color = make_double4(0, 0, 0, 0);
+        for (int s = 0; s < samples; s++) {
+            auto u = (i + random_double()) / (image_width - 1);
+            auto v = (j + random_double()) / (image_height - 1);
+            ray r = cam->get_ray(u, v);
+            color c = ray_color(r, temp_world, max_depth);
+            double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
+            pixel_color = make_double4(
+                c.x() + pixel_color.x,
+                c.y() + pixel_color.y,
+                c.z() + pixel_color.z,
+                s+1);
+            pixels[i + j * image_width] = pixel_color;
+        }
+    }
+}
+
+bool convertPixels(double4 *gpuPixels, sf::Uint8 *sfml_pixels, int image_width, int image_height) {
+    bool finished = true;
     for (int x = 0; x < image_width; x++) {
         for (int y = 0; y < image_height; y++) {
             int i = x + y * image_width;
             double4 pixel = gpuPixels[x + (image_height - y - 1) * image_width];
 
-            auto scale = 1.0 / pixel.w;
-            //printf("%f\n", pixel.w);
-            auto r = sqrt(scale * pixel.x);
-            auto g = sqrt(scale * pixel.y);
-            auto b = sqrt(scale * pixel.z);
-            sfml_pixels[i * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
-            sfml_pixels[i * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
-            sfml_pixels[i * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
-            sfml_pixels[i * 4 + 3] = 255u;
+            if (pixel.w > 0) {
+                auto scale = 1.0 / pixel.w;
+                auto r = sqrt(scale * pixel.x);
+                auto g = sqrt(scale * pixel.y);
+                auto b = sqrt(scale * pixel.z);
+                sfml_pixels[i * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
+                sfml_pixels[i * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
+                sfml_pixels[i * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
+                sfml_pixels[i * 4 + 3] = 255u;
+            } else {
+                finished = false;
+            }
         }
     }
+
+    return finished;
 }
 
 __host__ int main() {
     srand(time(NULL));
 
     // Image
-    // const auto aspect_ratio = 16.f / 9.f;
-    const auto aspect_ratio = 1;
-    const int image_width = 640;
+    const auto aspect_ratio = 16.f / 9.f;
+    // const auto aspect_ratio = 1;
+    const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 20;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 5;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 10;
     const int tile_size = 32;
 
@@ -365,7 +370,7 @@ __host__ int main() {
     sf::RenderWindow window(sf::VideoMode(image_width, image_height), "Ray Tracing with CUDA",
                             sf::Style::Titlebar | sf::Style::Close);
     auto desktop = sf::VideoMode::getDesktopMode();
-    window.setPosition(sf::Vector2i(desktop.width / 2 - window.getSize().x / 2, desktop.height / 2 - window.getSize().y / 2));
+    window.setPosition(sf::Vector2i(desktop.width / 2 - window.getSize().x / 2, desktop.height / 2 - window.getSize().y / 2 - 40));
     sf::Texture tex;
     sf::Sprite sprite;
 
@@ -379,17 +384,17 @@ __host__ int main() {
     sprite.setTexture(tex);
 
     // Render
-    int total_tiles_x = (int)std::ceil((double)image_width / (double)tile_size);
-    int total_tiles_x_pixels = total_tiles_x * tile_size;
-    int total_tiles_y = (int)std::ceil((double)image_height / (double)tile_size);
-    int total_tiles_y_pixels = total_tiles_y * tile_size;
-    int nb_tiles = total_tiles_x * total_tiles_y;
-    std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
-    std::cerr << "total_tiles_x: " << total_tiles_x << "\n";
-    std::cerr << "total_tiles_y: " << total_tiles_y << "\n";
-    std::cerr << "Nb tile: " << nb_tiles << "\n";
-    std::cerr << "Sample size: " << samples_per_pixel << "\n";
-    Tile **tiles = (Tile **)malloc(nb_tiles * sizeof(Tile *));
+    // int total_tiles_x = (int)std::ceil((double)image_width / (double)tile_size);
+    // int total_tiles_x_pixels = total_tiles_x * tile_size;
+    // int total_tiles_y = (int)std::ceil((double)image_height / (double)tile_size);
+    // int total_tiles_y_pixels = total_tiles_y * tile_size;
+    // int nb_tiles = total_tiles_x * total_tiles_y;
+    // std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
+    // std::cerr << "total_tiles_x: " << total_tiles_x << "\n";
+    // std::cerr << "total_tiles_y: " << total_tiles_y << "\n";
+    // std::cerr << "Nb tile: " << nb_tiles << "\n";
+    // std::cerr << "Sample size: " << samples_per_pixel << "\n";
+    // Tile **tiles = (Tile **)malloc(nb_tiles * sizeof(Tile *));
 
     double iStart = cpuSecond();
 
@@ -415,14 +420,15 @@ __host__ int main() {
     cudaMallocManaged(&pixels, array_size);
 
     camera *dev_cam;
-    printf("cudaMalloc %d\n", cudaMalloc(&dev_cam, sizeof(cam)));
-    printf("cudaMemcpy %d\n", cudaMemcpy(dev_cam, &cam, sizeof(cam), cudaMemcpyHostToDevice));
+    cudaMalloc(&dev_cam, sizeof(camera));
+    cudaMemcpy(dev_cam, &cam, sizeof(camera), cudaMemcpyHostToDevice);
 
     curandState *curandStates = NULL;
     cudaMalloc(&curandStates, grid_x * grid_y * grid_width * grid_height * sizeof(curandState));
-    init_random_cuda<<<1, 1>>>(curandStates, rand());
+    init_rand<<<1,1>>>(curandStates);
+    init_random_cuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(image_width, image_height);
 
-    printf("%d\n", cudaDeviceSynchronize());
+    printf("Init random synchronize: %d\n", cudaDeviceSynchronize());
 
     hittable_list **world;
     cudaMalloc(&world, sizeof(hittable_list *));
@@ -430,13 +436,13 @@ __host__ int main() {
     hittable **objects_array;
     cudaMalloc(&objects_array, 1000 * sizeof(hittable *));
 
-    random_scene_kernel<<<1, 1>>>(world, objects_array);
+    random_scene_kernel<<<1, 1>>>(world, objects_array, image_width, image_height);
 
-    printf("device sync %d\n", cudaDeviceSynchronize());
+    printf("Random scene synchronize: %d\n", cudaDeviceSynchronize());
     // renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
     renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
-
-    printf("device sync %d\n", cudaDeviceSynchronize());
+    // renderCuda<<<dim3(2,64), dim3(32,1)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
+    // printf("device sync %d\n", cudaDeviceSynchronize());
 
     // Render each tile
     // m.lock();
@@ -465,7 +471,7 @@ __host__ int main() {
 
             // mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
 
-            convertPixels(pixels, pixel_array_sfml, image_width, image_height);
+            bool tempFinished = convertPixels(pixels, pixel_array_sfml, image_width, image_height);
 
             tex.update(pixel_array_sfml);
 
@@ -475,7 +481,7 @@ __host__ int main() {
 
             // Sleep to not update too often
             // 10% performance hit with 720p 5 samples
-            sf::sleep(sf::milliseconds(100));
+            // sf::sleep(sf::milliseconds(100));
 
             // bool tempFinished = true;
             // for (int i = 0; i < nb_tiles; i++) {
@@ -486,23 +492,23 @@ __host__ int main() {
             //     }
             // }
 
-            // if (tempFinished) {
-            //     double iElaps = cpuSecond() - iStart;
+            if (tempFinished) {
+                double iElaps = cpuSecond() - iStart;
 
-            //     std::cerr << "Done render in " << iElaps << " seconds\n";
+                std::cerr << "Done render in " << iElaps << " seconds\n";
 
-            //     // Merge one last time to be sure that the image is complete
-            //     mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
-            //     tex.update(pixel_array_sfml);
+                // Merge one last time to be sure that the image is complete
+                //mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
+                tex.update(pixel_array_sfml);
 
-            //     window.clear();
-            //     window.draw(sprite);
-            //     window.display();
+                window.clear();
+                window.draw(sprite);
+                window.display();
 
-            //     tex.copyToImage().saveToFile("render.png");
+                tex.copyToImage().saveToFile("render.png");
 
-            //     renderFinished = true;
-            // }
+                renderFinished = true;
+            }
         } else {
             window.waitEvent(event);
             if (event.type == sf::Event::Closed) window.close();
