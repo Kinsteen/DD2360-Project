@@ -21,6 +21,13 @@ In the implementation, every tile has a thread, and every thread in launched sim
 
 The merging code works pretty well, but readability could be improved and performance should also be of concerns. I'm not sure if there's a more optimal way than just cycling through every pixel in a tile, but maybe.
 
+## CUDA version
+A lot of the code can be reused. Every function running on device should have `__device__` identifier, and most of the code works.
+
+std::vectors and shared pointers do not exist in CUDA, so they need to be replaced with static arrays.
+
+Random is also a problem as rand() is not available on device. Curand makes possible to generate random numbers on device, but it's a bit more complicated to use. In this implementation, we declare a global curand state on the device, and launch a kernel to initialize it on every kernel thread that will be launched.
+
 ### Results
 - Single threaded, 5 samples, 500x281: 25 seconds
 - Multi threaded, 5 samples, 500x281, 16 threads: 3.5 seconds (7 times faster)
