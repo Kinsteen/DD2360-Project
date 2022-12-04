@@ -310,9 +310,9 @@ __host__ int main(int argc, char *argv[]) {
     // Image
     const auto aspect_ratio = 16.f / 9.f;
     // const auto aspect_ratio = 1;
-    const int image_width = 1280;
+    const int image_width = 320;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 5;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 3;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 10;
     const int tile_size = 32;
 
@@ -451,16 +451,7 @@ __host__ int main(int argc, char *argv[]) {
 
             // Sleep to not update too often
             // 10% performance hit with 720p 5 samples
-            // sf::sleep(sf::milliseconds(100));
-
-            // bool tempFinished = true;
-            // for (int i = 0; i < nb_tiles; i++) {
-            //     Tile *t = tiles[i];
-            //     if (!t->done) {
-            //         tempFinished = false;
-            //         break;
-            //     }
-            // }
+            sf::sleep(sf::milliseconds(100));
 
             if (tempFinished) {
                 double iElaps = cpuSecond() - iStart;
