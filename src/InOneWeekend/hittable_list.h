@@ -26,14 +26,14 @@ class hittable_list : public hittable {
     }
 
     __host__ __device__ virtual bool hit(
-        const ray& r, double t_min, double t_max, hit_record& rec);
+        const ray& r, float t_min, float t_max, hit_record& rec);
 
    public:
     hittable** objects_array;
     int size;
 };
 
-__host__ __device__ bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& rec) {
+__host__ __device__ bool hittable_list::hit(const ray& r, float t_min, float t_max, hit_record& rec) {
     hit_record temp_rec;
     auto hit_anything = false;
     auto closest_so_far = t_max;

@@ -5,57 +5,57 @@ __device__ curandState* dev_states;
 __device__ int dev_image_width;
 __device__ int dev_image_height;
 
-inline __host__ __device__ void operator+=(double3 &a, double3 b)
+inline __host__ __device__ void operator+=(float3 &a, float3 b)
 {
     a.x += b.x;
     a.y += b.y;
     a.z += b.z;
 }
 
-inline __host__ __device__ bool operator==(double3 &a, double b)
+inline __host__ __device__ bool operator==(float3 &a, float b)
 {
     return a.x == b && a.y == b && a.z == b;
 }
 
-inline __host__ __device__ bool operator==(double4 &a, double b)
+inline __host__ __device__ bool operator==(float4 &a, float b)
 {
     return a.x == b && a.y == b && a.z == b;
 }
 
-inline __host__ __device__ double3 operator*(const double t, const double3 &a)
+inline __host__ __device__ float3 operator*(const float t, const float3 &a)
 {
-    return make_double3(a.x * t, a.y * t, a.z * t);
+    return make_float3(a.x * t, a.y * t, a.z * t);
 }
 
-inline __host__ __device__ double3 operator*(const double3 &a, double t)
+inline __host__ __device__ float3 operator*(const float3 &a, float t)
 {
     return t * a;
 }
 
-inline __host__ __device__ double3 operator+(const double3 &a, const double3 &b)
+inline __host__ __device__ float3 operator+(const float3 &a, const float3 &b)
 {
-    return make_double3(a.x + b.x, a.y + b.y, a.z + b.z);
+    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
 }
 
-inline __host__ __device__ double dot(double3 a, double3 b)
+inline __host__ __device__ float dot(float3 a, float3 b)
 {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-inline __host__ __device__ double3 normalize(double3 v)
+inline __host__ __device__ float3 normalize(float3 v)
 {
-    double invLen = rsqrtf(dot(v, v));
+    float invLen = rsqrtf(dot(v, v));
     return v * invLen;
 }
 
-inline __host__ __device__ double3 operator/(double3 a, double b)
+inline __host__ __device__ float3 operator/(float3 a, float b)
 {
-    return make_double3(a.x / b, a.y / b, a.z / b);
+    return make_float3(a.x / b, a.y / b, a.z / b);
 }
 
-inline __host__ __device__ double3 operator-(double3 a, double3 b)
+inline __host__ __device__ float3 operator-(float3 a, float3 b)
 {
-    return make_double3(a.x - b.x, a.y - b.y, a.z - b.z);
+    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 #endif

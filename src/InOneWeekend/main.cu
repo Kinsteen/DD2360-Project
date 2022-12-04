@@ -71,8 +71,8 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
 
     for (int a = -11; a < 11; a++) {
         for (int b = -11; b < 11; b++) {
-            auto choose_mat = random_double();
-            point3 center(a + 0.9 * random_double(), 0.2, b + 0.9 * random_double());
+            auto choose_mat = random_float();
+            point3 center(a + 0.9 * random_float(), 0.2, b + 0.9 * random_float());
 
             if ((center - point3(4, 0.2, 0)).length() > 0.9) {
                 material *sphere_material;
@@ -85,7 +85,7 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
                 } else if (choose_mat < 0.95) {
                     // metal
                     auto albedo = color::random(0.5, 1);
-                    auto fuzz = random_double(0, 0.5);
+                    auto fuzz = random_float(0, 0.5);
                     sphere_material = new metal(albedo, fuzz);
                     objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 } else {
@@ -119,7 +119,7 @@ __global__ void random_scene_kernel(hittable_list **world, hittable **objects_ar
 class Tile {
    private:
     int id;
-    double4 *pixel_array;
+    float4 *pixel_array;
     std::thread thread;
     Tile **tiles;
 
@@ -135,7 +135,7 @@ class Tile {
     ~Tile();
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
     void renderThread(int image_width, int image_height, camera cam, hittable_list **world_ptr, int max_depth);
-    double4 *getPixels();
+    float4 *getPixels();
 };
 
 Tile::Tile(int id, Tile **tiles, int x, int y, int tile_size, int samples) {
@@ -145,7 +145,7 @@ Tile::Tile(int id, Tile **tiles, int x, int y, int tile_size, int samples) {
     this->y = y;
     this->tile_size = tile_size;
     this->samples = samples;
-    this->pixel_array = (double4 *)malloc(tile_size * tile_size * sizeof(double4));
+    this->pixel_array = (float4 *)malloc(tile_size * tile_size * sizeof(float4));
 }
 
 Tile::~Tile() {
@@ -173,13 +173,13 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
                 int tile_y = j - this->y;
                 int array_idx = tile_x + tile_y * tile_size;
 
-                double4 pixel_color = this->pixel_array[array_idx];
-                auto u = (i + random_double()) / (image_width - 1);
-                auto v = (j + random_double()) / (image_height - 1);
+                float4 pixel_color = this->pixel_array[array_idx];
+                auto u = (i + random_float()) / (image_width - 1);
+                auto v = (j + random_float()) / (image_height - 1);
                 ray r = cam.get_ray(u, v);
                 color c = ray_color(r, world, max_depth);
-                double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
-                pixel_color = make_double4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
+                float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
+                pixel_color = make_float4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
                 this->pixel_array[array_idx] = pixel_color;
             }
         }
@@ -197,7 +197,7 @@ void Tile::renderThread(int image_width, int image_height, camera cam, hittable_
     this->thread = std::move(thread);
 }
 
-double4 *Tile::getPixels() {
+float4 *Tile::getPixels() {
     return this->pixel_array;
 }
 
@@ -215,7 +215,7 @@ bool mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_siz
         // Index of final pixel array (size of final image)
         int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
 
-        double4 *pixels = t->getPixels();
+        float4 *pixels = t->getPixels();
 
         for (int p = 0; p < length; p++) {
             // bottom pixel line should go on top
@@ -247,7 +247,7 @@ bool mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_siz
     return tempFinished;
 }
 
-__global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
+__global__ void renderCuda(float4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
     // const int id = i + j * blockIdx.y * blockDim.y;
@@ -255,14 +255,14 @@ __global__ void renderCuda(double4 *pixels, int image_width, int image_height, i
     hittable_list temp_world = **world_ptr;
 
     if (i < image_width && j < image_height) {
-        double4 pixel_color = make_double4(0, 0, 0, 0);
+        float4 pixel_color = make_float4(0, 0, 0, 0);
         for (int s = 0; s < samples; s++) {
-            auto u = (i + random_double()) / (image_width - 1);
-            auto v = (j + random_double()) / (image_height - 1);
+            auto u = (i + random_float()) / (image_width - 1);
+            auto v = (j + random_float()) / (image_height - 1);
             ray r = cam->get_ray(u, v);
             color c = ray_color(r, temp_world, max_depth);
-            double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
-            pixel_color = make_double4(
+            float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
+            pixel_color = make_float4(
                 c.x() + pixel_color.x,
                 c.y() + pixel_color.y,
                 c.z() + pixel_color.z,
@@ -272,12 +272,12 @@ __global__ void renderCuda(double4 *pixels, int image_width, int image_height, i
     }
 }
 
-bool convertPixels(double4 *gpuPixels, sf::Uint8 *sfml_pixels, int image_width, int image_height) {
+bool convertPixels(float4 *gpuPixels, sf::Uint8 *sfml_pixels, int image_width, int image_height) {
     bool finished = true;
     for (int x = 0; x < image_width; x++) {
         for (int y = 0; y < image_height; y++) {
             int i = x + y * image_width;
-            double4 pixel = gpuPixels[x + (image_height - y - 1) * image_width];
+            float4 pixel = gpuPixels[x + (image_height - y - 1) * image_width];
 
             if (pixel.w > 0) {
                 auto scale = 1.0 / pixel.w;
@@ -312,7 +312,7 @@ __host__ int main(int argc, char *argv[]) {
     // const auto aspect_ratio = 1;
     const int image_width = 320;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 3;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 15;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 10;
     const int tile_size = 32;
 
@@ -347,11 +347,11 @@ __host__ int main(int argc, char *argv[]) {
 
     double iStart = cpuSecond();
 
-    double4 *pixels;
+    float4 *pixels;
 
-    int total_tiles_x = (int)std::ceil((double)image_width / (double)tile_size);
+    int total_tiles_x = (int)std::ceil((float)image_width / (float)tile_size);
     int total_tiles_x_pixels = total_tiles_x * tile_size;
-    int total_tiles_y = (int)std::ceil((double)image_height / (double)tile_size);
+    int total_tiles_y = (int)std::ceil((float)image_height / (float)tile_size);
     int total_tiles_y_pixels = total_tiles_y * tile_size;
     int nb_tiles = total_tiles_x * total_tiles_y;
     Tile **tiles = (Tile **)malloc(nb_tiles * sizeof(Tile *));
@@ -367,10 +367,10 @@ __host__ int main(int argc, char *argv[]) {
 
         int grid_height = 32;
         int grid_width = grid_height;
-        int grid_x = ceil(image_width / (double)grid_width) + 1;
-        int grid_y = ceil(image_height / (double)grid_height) + 1;
+        int grid_x = ceil(image_width / (float)grid_width) + 1;
+        int grid_y = ceil(image_height / (float)grid_height) + 1;
 
-        size_t array_size = grid_x * grid_y * grid_width * grid_height * sizeof(double4);
+        size_t array_size = grid_x * grid_y * grid_width * grid_height * sizeof(float4);
 
         printf("grid_x %d / grid_y %d\n", grid_x, grid_y);
 

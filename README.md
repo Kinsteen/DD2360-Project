@@ -32,3 +32,7 @@ Random is also a problem as rand() is not available on device. Curand makes poss
 - Single threaded, 5 samples, 500x281: 25 seconds
 - Multi threaded, 5 samples, 500x281, 16 threads: 3.5 seconds (7 times faster)
 - CUDA, 5 samples, 500x281: 1.31773 seconds (19 times faster than single thread CPU)
+- CUDA, 30 samples, 1280x720, float: 38.6235 seconds
+- CUDA, 30 samples, 1280x720, double: 84.5456 seconds
+- Multi threaded, 30 samples, 1280x720, double: 161.626 seconds
+- Multi threaded, 30 samples, 1280x720, float: 140.278 seconds

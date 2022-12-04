@@ -24,16 +24,16 @@ using std::sqrt;
 
 // Constants
 
-const double infinity = std::numeric_limits<double>::infinity();
-const double pi = 3.1415926535897932385;
+const float infinity = std::numeric_limits<float>::infinity();
+const float pi = 3.1415926535897932385;
 
 // Utility Functions
 
-__host__ __device__ inline double degrees_to_radians(double degrees) {
+__host__ __device__ inline float degrees_to_radians(float degrees) {
     return degrees * pi / 180.0;
 }
 
-__host__ __device__ inline double clamp(double x, double min, double max) {
+__host__ __device__ inline float clamp(float x, float min, float max) {
     if (x < min) return min;
     if (x > max) return max;
     return x;
@@ -56,7 +56,7 @@ __global__ void init_random_cuda(int image_width, int image_height) {
     curand_init(clock64()+pixel_index, 0, 0, &dev_states[pixel_index]);
 }
 
-__host__ __device__ inline double random_double() {
+__host__ __device__ inline float random_float() {
 // Returns a random real in [0,1).
 #ifdef __CUDA_ARCH__
     int i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -69,14 +69,14 @@ __host__ __device__ inline double random_double() {
 #endif
 }
 
-__host__ __device__ inline double random_double(double min, double max) {
+__host__ __device__ inline float random_float(float min, float max) {
     // Returns a random real in [min,max).
-    return min + (max - min) * random_double();
+    return min + (max - min) * random_float();
 }
 
 __host__ __device__ inline int random_int(int min, int max) {
     // Returns a random integer in [min,max].
-    return static_cast<int>(random_double(min, max + 1));
+    return static_cast<int>(random_float(min, max + 1));
 }
 
 // Common Headers

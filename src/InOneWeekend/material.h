@@ -56,7 +56,7 @@ class lambertian : public material {
 
 class metal : public material {
    public:
-    __host__ __device__ metal(const color& a, double f) : albedo(a), fuzz(f < 1 ? f : 1) {}
+    __host__ __device__ metal(const color& a, float f) : albedo(a), fuzz(f < 1 ? f : 1) {}
 
     __host__ __device__ virtual bool scatter(
         const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered) const override {
@@ -68,26 +68,26 @@ class metal : public material {
 
    public:
     color albedo;
-    double fuzz;
+    float fuzz;
 };
 
 class dielectric : public material {
    public:
-    __host__ __device__ dielectric(double index_of_refraction) : ir(index_of_refraction) {}
+    __host__ __device__ dielectric(float index_of_refraction) : ir(index_of_refraction) {}
 
     __host__ __device__ virtual bool scatter(
         const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered) const override {
         attenuation = color(1.0, 1.0, 1.0);
-        double refraction_ratio = rec.front_face ? (1.0 / ir) : ir;
+        float refraction_ratio = rec.front_face ? (1.0 / ir) : ir;
 
         vec3 unit_direction = unit_vector(r_in.direction());
-        double cos_theta = fmin(dot(-unit_direction, rec.normal), 1.0);
-        double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+        float cos_theta = fmin(dot(-unit_direction, rec.normal), 1.0f);
+        float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 
         bool cannot_refract = refraction_ratio * sin_theta > 1.0;
         vec3 direction;
 
-        if (cannot_refract || reflectance(cos_theta, refraction_ratio) > random_double())
+        if (cannot_refract || reflectance(cos_theta, refraction_ratio) > random_float())
             direction = reflect(unit_direction, rec.normal);
         else
             direction = refract(unit_direction, rec.normal, refraction_ratio);
@@ -97,10 +97,10 @@ class dielectric : public material {
     }
 
    public:
-    double ir;  // Index of Refraction
+    float ir;  // Index of Refraction
 
    private:
-    __host__ __device__ static double reflectance(double cosine, double ref_idx) {
+    __host__ __device__ static float reflectance(float cosine, float ref_idx) {
         // Use Schlick's approximation for reflectance.
         auto r0 = (1 - ref_idx) / (1 + ref_idx);
         r0 = r0 * r0;
