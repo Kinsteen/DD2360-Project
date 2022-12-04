@@ -20,6 +20,9 @@ set ( CMAKE_CXX_STANDARD 11 )
 # Set CUDA architecture. Change according to what is supported on your GPU
 set ( CMAKE_CUDA_ARCHITECTURES 86 )
 
+set ( CMAKE_BUILD_TYPE Debug )
+add_compile_options ( -lineinfo -rdynamic )
+
 # Source
 set ( COMMON_ALL
   src/common/rtweekend.h

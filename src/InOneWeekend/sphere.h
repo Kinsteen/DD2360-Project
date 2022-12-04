@@ -18,13 +18,29 @@
 
 class sphere : public hittable {
     public:
-        sphere() {}
+        __host__ __device__ sphere() {}
 
-        sphere(point3 cen, double r, material* m)
+        __host__ __device__ sphere(point3 cen, double r, material* m)
             : center(cen), radius(r), mat_ptr(m) {};
 
-        __host__ __device__ virtual bool hit(
-            const ray& r, double t_min, double t_max, hit_record& rec) const override;
+        __host__ __device__ bool hit(
+            const ray& r, double t_min, double t_max, hit_record& rec);
+        
+        __host__ __device__ void whoami() {
+            printf("Sphere!\n");
+        }
+
+    // void* operator new(size_t len) {
+    //     void* ptr;
+    //     cudaMallocManaged(&ptr, len);
+    //     cudaDeviceSynchronize();
+    //     return ptr;
+    // }
+
+    // void operator delete(void* ptr) {
+    //     cudaDeviceSynchronize();
+    //     cudaFree(ptr);
+    // }
 
     public:
         point3 center;
@@ -33,7 +49,7 @@ class sphere : public hittable {
 };
 
 __host__ __device__
-bool sphere::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+bool sphere::hit(const ray& r, double t_min, double t_max, hit_record& rec) {
     vec3 oc = r.origin() - center;
     auto a = r.direction().length_squared();
     auto half_b = dot(oc, r.direction());

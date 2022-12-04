@@ -41,11 +41,11 @@ inline double clamp(double x, double min, double max) {
     return x;
 }
 
-__global__ void init_random_cuda(curandState *states) {
+__global__ void init_random_cuda(curandState *states, unsigned long long seed) {
     // Set the device pointer to the new pointer set
     dev_states = states;
     int idx = threadIdx.x+blockDim.x*blockIdx.x;
-    curand_init(1234, idx, 0, &dev_states[idx]);
+    curand_init(seed, idx, 0, &dev_states[idx]);
 }
 
 __host__ __device__

@@ -38,7 +38,7 @@ double cpuSecond() {
 
 __host__ __device__
     color
-    ray_color(const ray &r, const hittable &world, int depth) {
+    ray_color(const ray &r, hittable &world, int depth) {
     hit_record rec;
 
     // If we've exceeded the ray bounce limit, no more light is gathered.
@@ -59,13 +59,14 @@ __host__ __device__
 }
 
 __host__
-    hittable_list
+    hittable_list *
     random_scene() {
-    hittable_list world;
-    std::vector<hittable *> objects;
+    hittable **objects_array;
+    cudaMallocManaged(&objects_array, sizeof(hittable *) * 5000);
+    int idx = 0;
 
     auto ground_material = new lambertian(color(0.5, 0.5, 0.5));
-    objects.push_back(new sphere(point3(0, -1000, 0), 1000, ground_material));
+    objects_array[idx++] = new sphere(point3(0, -1000, 0), 1000, ground_material);
 
     for (int a = -11; a < 11; a++) {
         for (int b = -11; b < 11; b++) {
@@ -79,43 +80,96 @@ __host__
                     // diffuse
                     auto albedo = color::random() * color::random();
                     sphere_material = new lambertian(albedo);
-                    objects.push_back(new sphere(center, 0.2, sphere_material));
+                    objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 } else if (choose_mat < 0.95) {
                     // metal
                     auto albedo = color::random(0.5, 1);
                     auto fuzz = random_double(0, 0.5);
                     sphere_material = new metal(albedo, fuzz);
-                    objects.push_back(new sphere(center, 0.2, sphere_material));
+                    objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 } else {
                     // glass
                     sphere_material = new dielectric(1.5);
-                    objects.push_back(new sphere(center, 0.2, sphere_material));
+                    objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 }
             }
         }
     }
 
     auto material1 = new dielectric(1.5);
-    objects.push_back(new sphere(point3(0, 1, 0), 1.0, material1));
+    objects_array[idx++] = new sphere(point3(0, 1, 0), 1.0, material1);
 
     auto material2 = new lambertian(color(0.4, 0.2, 0.1));
-    objects.push_back(new sphere(point3(-4, 1, 0), 1.0, material2));
+    objects_array[idx++] = new sphere(point3(-4, 1, 0), 1.0, material2);
 
     auto material3 = new metal(color(0.7, 0.6, 0.5), 0.0);
-    objects.push_back(new sphere(point3(4, 1, 0), 1.0, material3));
+    objects_array[idx++] = new sphere(point3(4, 1, 0), 1.0, material3);
 
-    hittable **objects_array = (hittable **)malloc(objects.size() * sizeof(hittable *));
+    std::cerr << "Pushed " << idx << " objects" << std::endl;
 
-    int i = 0;
-    for (auto obj : objects) {
-        objects_array[i] = obj;
-        i++;
-    }
-    std::cerr << "Pushed " << i << " objects" << std::endl;
-
-    hittable_list world_array(objects_array, i);
+    hittable_list *world_array = new hittable_list(objects_array, idx);
 
     return world_array;
+}
+
+// We can't generate the scene on host because of the use of virtual functions in the hittable objects.
+// We need to do everything on the GPU
+// This function takes a pointer to a world, and the GPU will create all objects in the scene
+__global__ void random_scene_kernel(hittable_list **world, hittable **objects_array) {
+    // hittable *objects_array[500];
+    // cudaMalloc(&objects_array, sizeof(hittable*) * 5000);
+    //  this doesn't work for some reason???
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i == 0 && j == 0) {
+        int idx = 0;
+
+        auto ground_material = new lambertian(color(0.5, 0.5, 0.5));
+        objects_array[idx++] = new sphere(point3(0, -1000, 0), 1000, ground_material);
+
+        for (int a = -11; a < 11; a++) {
+            for (int b = -11; b < 11; b++) {
+                auto choose_mat = random_double();
+                point3 center(a + 0.9 * random_double(), 0.2, b + 0.9 * random_double());
+
+                if ((center - point3(4, 0.2, 0)).length() > 0.9) {
+                    material *sphere_material;
+
+                    if (choose_mat < 0.8) {
+                        // diffuse
+                        auto albedo = color::random() * color::random();
+                        sphere_material = new lambertian(albedo);
+                        objects_array[idx++] = new sphere(center, 0.2, sphere_material);
+                    } else if (choose_mat < 0.95) {
+                        // metal
+                        auto albedo = color::random(0.5, 1);
+                        auto fuzz = random_double(0, 0.5);
+                        sphere_material = new metal(albedo, fuzz);
+                        objects_array[idx++] = new sphere(center, 0.2, sphere_material);
+                    } else {
+                        // glass
+                        sphere_material = new dielectric(1.5);
+                        objects_array[idx++] = new sphere(center, 0.2, sphere_material);
+                    }
+                }
+            }
+        }
+
+        auto material1 = new dielectric(1.5);
+        objects_array[idx++] = new sphere(point3(0, 1, 0), 1.0, material1);
+
+        auto material2 = new lambertian(color(0.4, 0.2, 0.1));
+        objects_array[idx++] = new sphere(point3(-4, 1, 0), 1.0, material2);
+
+        auto material3 = new metal(color(0.7, 0.6, 0.5), 0.0);
+        objects_array[idx++] = new sphere(point3(4, 1, 0), 1.0, material3);
+
+        // std::cerr << "Pushed " << idx << " objects" << std::endl;
+
+        *world = new hittable_list(objects_array, idx);
+        printf("world ptr 1st obj %p\n", (*world)->objects_array[0]);
+    }
 }
 
 class Tile {
@@ -136,7 +190,7 @@ class Tile {
     Tile(int id, Tile **tiles, int x, int y, int tile_size, int samples);
     ~Tile();
     void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
-    void renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
+    void renderThread(int image_width, int image_height, camera cam, hittable_list *world, int max_depth);
     double4 *getPixels();
 };
 
@@ -193,34 +247,39 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
     m.unlock();
 }
 
-void Tile::renderThread(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
-    std::thread thread(&Tile::render, this, image_width, image_height, cam, world, max_depth);
+void Tile::renderThread(int image_width, int image_height, camera cam, hittable_list *world, int max_depth) {
+    hittable_list temp = *world;
+    std::thread thread(&Tile::render, this, image_width, image_height, cam, temp, max_depth);
     this->thread = std::move(thread);
 }
 
-__global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list *world, int max_depth) {
+double4 *Tile::getPixels() {
+    return this->pixel_array;
+}
+
+__global__ void renderCuda(double4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
     // const int id = i + j * blockIdx.y * blockDim.y;
 
-    hittable_list temp_world = *world;
+    hittable_list temp_world = **world_ptr;
 
     if (i < image_width && j < image_height) {
-        for (int s = 0; s < samples; ++s) {
-            double4 pixel_color = pixels[i + j * image_width];
+        double4 pixel_color = make_double4(0, 0, 0, 0);
+        for (int s = 1; s <= samples; ++s) {
             auto u = (i + random_double()) / (image_width - 1);
             auto v = (j + random_double()) / (image_height - 1);
             ray r = cam->get_ray(u, v);
             color c = ray_color(r, temp_world, max_depth);
             double4 new_color = make_double4(c.x(), c.y(), c.z(), s);
-            pixel_color = make_double4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
+            pixel_color = make_double4(
+                c.x() + pixel_color.x,
+                c.y() + pixel_color.y,
+                c.z() + pixel_color.z,
+                s);
             pixels[i + j * image_width] = pixel_color;
         }
     }
-}
-
-double4 *Tile::getPixels() {
-    return this->pixel_array;
 }
 
 void mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_size, int image_height, int image_width, int samples) {
@@ -259,19 +318,39 @@ void mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_siz
     }
 }
 
+void convertPixels(double4 *gpuPixels, sf::Uint8 *sfml_pixels, int image_width, int image_height) {
+    for (int x = 0; x < image_width; x++) {
+        for (int y = 0; y < image_height; y++) {
+            int i = x + y * image_width;
+            double4 pixel = gpuPixels[x + (image_height - y - 1) * image_width];
+
+            auto scale = 1.0 / pixel.w;
+            //printf("%f\n", pixel.w);
+            auto r = sqrt(scale * pixel.x);
+            auto g = sqrt(scale * pixel.y);
+            auto b = sqrt(scale * pixel.z);
+            sfml_pixels[i * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
+            sfml_pixels[i * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
+            sfml_pixels[i * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
+            sfml_pixels[i * 4 + 3] = 255u;
+        }
+    }
+}
+
 __host__ int main() {
     srand(time(NULL));
 
     // Image
+    // const auto aspect_ratio = 16.f / 9.f;
     const auto aspect_ratio = 1;
-    const int image_width = 320;
+    const int image_width = 640;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
-    const int max_depth = 50;
+    const int samples_per_pixel = 20;  // 3 samples is the minimum to have a correct contrast / colors
+    const int max_depth = 10;
     const int tile_size = 32;
 
     // World
-    auto world = random_scene();
+    // auto world = random_scene();
 
     // Camera
     point3 lookfrom(13, 2, 3);
@@ -314,50 +393,62 @@ __host__ int main() {
 
     double iStart = cpuSecond();
 
+    // Increase the stack size
+    // Can be removed if we remove recursions in kernels
+    size_t stackSize;
+    cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
+    std::cerr << "GPU Stack size: " << stackSize << std::endl;
+    cudaDeviceSetLimit(cudaLimitStackSize, 65536);
+    cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
+    std::cerr << "GPU Stack size: " << stackSize << std::endl;
+
+    int grid_height = 32;
+    int grid_width = grid_height;
+    int grid_x = ceil(image_width / (double)grid_width) + 1;
+    int grid_y = ceil(image_height / (double)grid_height) + 1;
+
+    size_t array_size = grid_x * grid_y * grid_width * grid_height * sizeof(double4);
+
+    printf("grid_x %d / grid_y %d\n", grid_x, grid_y);
+
+    double4 *pixels;
+    cudaMallocManaged(&pixels, array_size);
+
+    camera *dev_cam;
+    printf("cudaMalloc %d\n", cudaMalloc(&dev_cam, sizeof(cam)));
+    printf("cudaMemcpy %d\n", cudaMemcpy(dev_cam, &cam, sizeof(cam), cudaMemcpyHostToDevice));
+
+    curandState *curandStates = NULL;
+    cudaMalloc(&curandStates, grid_x * grid_y * grid_width * grid_height * sizeof(curandState));
+    init_random_cuda<<<1, 1>>>(curandStates, rand());
+
+    printf("%d\n", cudaDeviceSynchronize());
+
+    hittable_list **world;
+    cudaMalloc(&world, sizeof(hittable_list *));
+
+    hittable **objects_array;
+    cudaMalloc(&objects_array, 1000 * sizeof(hittable *));
+
+    random_scene_kernel<<<1, 1>>>(world, objects_array);
+
+    printf("device sync %d\n", cudaDeviceSynchronize());
+    // renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
+    renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
+
+    printf("device sync %d\n", cudaDeviceSynchronize());
+
     // Render each tile
-    m.lock();
-    for (int i = nb_tiles - 1; i >= 0; i--) {
-        int pixel_x = (i * tile_size) % total_tiles_x_pixels;
-        int pixel_y = (i / (total_tiles_x)) * tile_size;
-        Tile *tile = new Tile(nb_tiles - 1 - i, tiles, pixel_x, pixel_y, tile_size, samples_per_pixel);
-        tiles[nb_tiles - 1 - i] = tile;
-        tile->renderThread(total_tiles_x_pixels, total_tiles_y_pixels, cam, world, max_depth);
-    }
-    m.unlock();
+    // m.lock();
+    // for (int i = nb_tiles - 1; i >= 0; i--) {
+    //     int pixel_x = (i * tile_size) % total_tiles_x_pixels;
+    //     int pixel_y = (i / (total_tiles_x)) * tile_size;
+    //     Tile *tile = new Tile(nb_tiles - 1 - i, tiles, pixel_x, pixel_y, tile_size, samples_per_pixel);
+    //     tiles[nb_tiles - 1 - i] = tile;
+    //     tile->renderThread(total_tiles_x_pixels, total_tiles_y_pixels, cam, *world, max_depth);
+    // }
+    // m.unlock();
 
-    // int grid_height = 16;
-    // int grid_width = grid_height;
-    // int grid_x = ceil(image_width / (double)grid_width) + 1;
-    // int grid_y = ceil(image_height / (double)grid_height) + 1;
-
-    // size_t array_size = grid_x * grid_y * grid_width * grid_height * sizeof(double4);
-
-    // printf("grid_x %d / grid_y %d\n", grid_x, grid_y);
-
-    // double4 *pixels;
-    // cudaMalloc(&pixels, array_size);
-
-    // double4 *pixels_host = (double4 *)malloc(array_size);
-    // memset(pixels_host, 0, array_size);
-
-    // camera *dev_cam;
-    // printf("cudaMalloc %d\n", cudaMalloc(&dev_cam, sizeof(cam)));
-    // printf("cudaMemcpy %d\n", cudaMemcpy(dev_cam, &cam, sizeof(cam), cudaMemcpyHostToDevice));
-
-    // hittable_list *dev_world;
-    // printf("cudaMalloc %d\n", cudaMalloc(&dev_world, sizeof(hittable_list)));
-    // printf("cudaMemcpy %d\n", cudaMemcpy(dev_world, &world, sizeof(hittable_list), cudaMemcpyHostToDevice));
-
-    // curandState *curandStates = NULL;
-    // cudaMalloc(&curandStates, grid_x * grid_y * grid_width * grid_height * sizeof(curandState));
-    // init_random_cuda<<<1, 1>>>(curandStates);
-
-    // printf("%d\n", cudaDeviceSynchronize());
-    // //renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
-    // renderCuda<<<1, 1>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
-
-    // printf("device sync %d\n", cudaDeviceSynchronize());
-    // exit(0);
     sf::Uint8 *pixel_array_sfml = (sf::Uint8 *)malloc(image_width * image_height * 4 * sizeof(sf::Uint8));
     memset(pixel_array_sfml, 0, image_width * image_height * 4 * sizeof(sf::Uint8));
     tex.update(pixel_array_sfml);
@@ -372,7 +463,9 @@ __host__ int main() {
                 if (event.type == sf::Event::Closed) window.close();
             }
 
-            mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
+            // mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
+
+            convertPixels(pixels, pixel_array_sfml, image_width, image_height);
 
             tex.update(pixel_array_sfml);
 
@@ -384,32 +477,32 @@ __host__ int main() {
             // 10% performance hit with 720p 5 samples
             sf::sleep(sf::milliseconds(100));
 
-            bool tempFinished = true;
-            for (int i = 0; i < nb_tiles; i++) {
-                Tile *t = tiles[i];
-                if (!t->done) {
-                    tempFinished = false;
-                    break;
-                }
-            }
+            // bool tempFinished = true;
+            // for (int i = 0; i < nb_tiles; i++) {
+            //     Tile *t = tiles[i];
+            //     if (!t->done) {
+            //         tempFinished = false;
+            //         break;
+            //     }
+            // }
 
-            if (tempFinished) {
-                double iElaps = cpuSecond() - iStart;
+            // if (tempFinished) {
+            //     double iElaps = cpuSecond() - iStart;
 
-                std::cerr << "Done render in " << iElaps << " seconds\n";
+            //     std::cerr << "Done render in " << iElaps << " seconds\n";
 
-                // Merge one last time to be sure that the image is complete
-                mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
-                tex.update(pixel_array_sfml);
+            //     // Merge one last time to be sure that the image is complete
+            //     mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
+            //     tex.update(pixel_array_sfml);
 
-                window.clear();
-                window.draw(sprite);
-                window.display();
+            //     window.clear();
+            //     window.draw(sprite);
+            //     window.display();
 
-                tex.copyToImage().saveToFile("render.png");
+            //     tex.copyToImage().saveToFile("render.png");
 
-                renderFinished = true;
-            }
+            //     renderFinished = true;
+            // }
         } else {
             window.waitEvent(event);
             if (event.type == sf::Event::Closed) window.close();

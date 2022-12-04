@@ -19,28 +19,27 @@
 
 class hittable_list : public hittable {
    public:
-    hittable_list() {}
-    hittable_list(hittable** objects, int size) {
+    __host__ __device__ hittable_list() {}
+    __host__ __device__ hittable_list(hittable** objects, int size) {
         objects_array = objects;
         this->size = size;
     }
 
     __host__ __device__ virtual bool hit(
-        const ray& r, double t_min, double t_max, hit_record& rec) const override;
+        const ray& r, double t_min, double t_max, hit_record& rec);
 
    public:
     hittable** objects_array;
     int size;
 };
 
-__host__ __device__ bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+__host__ __device__ bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& rec) {
     hit_record temp_rec;
     auto hit_anything = false;
     auto closest_so_far = t_max;
 
     for (int i = 0; i < size; i++) {
-        auto object = objects_array[i];
-        if (object->hit(r, t_min, closest_so_far, temp_rec)) {
+        if (objects_array[i]->hit(r, t_min, closest_so_far, temp_rec)) {
             hit_anything = true;
             closest_so_far = temp_rec.t;
             rec = temp_rec;
