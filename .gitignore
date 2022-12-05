@@ -46,6 +46,7 @@ _deps
 *.app
 inOneWeekend
 
-# Output images
+# Outputs
 *.ppm
 *.png
+result.txt

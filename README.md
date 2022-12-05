@@ -36,3 +36,9 @@ Random is also a problem as rand() is not available on device. Curand makes poss
 - CUDA, 30 samples, 1280x720, double: 84.5456 seconds
 - Multi threaded, 30 samples, 1280x720, double: 161.626 seconds
 - Multi threaded, 30 samples, 1280x720, float: 140.278 seconds
+
+According to https://xmartlabs.github.io/cuda-calculator/, the optimal number of threads per block is 640, which is a tile of 32x20.
+Resolution: 800x450, 32x32: 4.62s average
+Resolution: 800x450, 20x32: 4.45s average (3.6% improvement)
+
+From here, each run creates a line in the result file, so that we can make the program run in a loop and get results.

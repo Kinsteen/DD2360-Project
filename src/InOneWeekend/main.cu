@@ -15,6 +15,7 @@
 
 #include <SFML/Graphics.hpp>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -252,15 +253,13 @@ __global__ void renderCuda(float4 *pixels, int image_width, int image_height, in
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
     // const int id = i + j * blockIdx.y * blockDim.y;
 
-    hittable_list temp_world = **world_ptr;
-
     if (i < image_width && j < image_height) {
         float4 pixel_color = make_float4(0, 0, 0, 0);
-        for (int s = 0; s < samples; s++) {
+        for (char s = 0; s < samples; s++) {
             auto u = (i + random_float()) / (image_width - 1);
             auto v = (j + random_float()) / (image_height - 1);
             ray r = cam->get_ray(u, v);
-            color c = ray_color(r, temp_world, max_depth);
+            color c = ray_color(r, **world_ptr, max_depth);
             float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
             pixel_color = make_float4(
                 c.x() + pixel_color.x,
@@ -310,7 +309,7 @@ __host__ int main(int argc, char *argv[]) {
     // Image
     const auto aspect_ratio = 16.f / 9.f;
     // const auto aspect_ratio = 1;
-    const int image_width = 320;
+    const int image_width = 800;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 15;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 10;
@@ -355,6 +354,11 @@ __host__ int main(int argc, char *argv[]) {
     int total_tiles_y_pixels = total_tiles_y * tile_size;
     int nb_tiles = total_tiles_x * total_tiles_y;
     Tile **tiles = (Tile **)malloc(nb_tiles * sizeof(Tile *));
+
+    // According to occupation calculator, 640 TPB is the optimal number.
+    int grid_height = 20;
+    int grid_width = 32;
+
     if (isCuda) {
         // Increase the stack size
         // Can be removed if we remove recursions in kernels
@@ -365,8 +369,6 @@ __host__ int main(int argc, char *argv[]) {
         cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
         std::cerr << "GPU Stack size: " << stackSize << std::endl;
 
-        int grid_height = 32;
-        int grid_width = grid_height;
         int grid_x = ceil(image_width / (float)grid_width) + 1;
         int grid_y = ceil(image_height / (float)grid_height) + 1;
 
@@ -397,7 +399,7 @@ __host__ int main(int argc, char *argv[]) {
 
         printf("Random scene synchronize: %d\n", cudaDeviceSynchronize());
         renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
-
+        //printf("Render synchronize: %d\n", cudaDeviceSynchronize());
     } else {
         // Render
 
@@ -449,14 +451,15 @@ __host__ int main(int argc, char *argv[]) {
             window.draw(sprite);
             window.display();
 
-            // Sleep to not update too often
-            // 10% performance hit with 720p 5 samples
-            sf::sleep(sf::milliseconds(100));
-
             if (tempFinished) {
                 double iElaps = cpuSecond() - iStart;
 
                 std::cerr << "Done render in " << iElaps << " seconds\n";
+
+                std::ofstream outfile;
+
+                outfile.open("result.txt", std::ios_base::app);  // append instead of overwrite
+                outfile << iElaps << ";" << image_width << ";" << image_height << ";" << grid_width << ";" << grid_height << ";" << samples_per_pixel << std::endl;
 
                 // Merge one last time to be sure that the image is complete
                 if (!isCuda) mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
@@ -469,7 +472,13 @@ __host__ int main(int argc, char *argv[]) {
                 tex.copyToImage().saveToFile("render.png");
 
                 renderFinished = true;
+                exit(0);
             }
+
+            // Sleep to not update too often
+            // 10% performance hit with 720p 5 samples on CPU
+            // 6% performance hit with 1600p on GPU
+            sf::sleep(sf::milliseconds(100));
         } else {
             window.waitEvent(event);
             if (event.type == sf::Event::Closed) window.close();
