@@ -25,38 +25,16 @@
 #include "cuda_utils.h"
 #include "hittable_list.h"
 #include "material.h"
+#include "render.h"
+#include "render_cpu.h"
+#include "render_gpu.h"
 #include "rtweekend.h"
 #include "sphere.h"
-
-std::mutex m;
-int threadStarted = 0;
 
 double cpuSecond() {
     struct timeval tp;
     gettimeofday(&tp, NULL);
     return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
-}
-
-__host__ __device__
-    color
-    ray_color(const ray &r, hittable &world, int depth) {
-    hit_record rec;
-
-    // If we've exceeded the ray bounce limit, no more light is gathered.
-    if (depth <= 0)
-        return color(0, 0, 0);
-
-    if (world.hit(r, 0.001, infinity, rec)) {
-        ray scattered;
-        color attenuation;
-        if (rec.mat_ptr->scatter(r, rec, attenuation, scattered))
-            return attenuation * ray_color(scattered, world, depth - 1);
-        return color(0, 0, 0);
-    }
-
-    vec3 unit_direction = unit_vector(r.direction());
-    auto t = 0.5 * (unit_direction.y() + 1.0);
-    return (1.0 - t) * color(1.0, 1.0, 1.0) + t * color(0.5, 0.7, 1.0);
 }
 
 __host__ __device__ void random_scene(hittable_list **world, hittable **objects_array, int image_width, int image_height) {
@@ -117,185 +95,6 @@ __global__ void random_scene_kernel(hittable_list **world, hittable **objects_ar
     random_scene(world, objects_array, image_width, image_height);
 }
 
-class Tile {
-   private:
-    int id;
-    float4 *pixel_array;
-    std::thread thread;
-    Tile **tiles;
-
-   public:
-    int x;
-    int y;
-    int tile_size;
-    int samples;
-    bool done = false;
-    bool started = false;
-
-    Tile(int id, Tile **tiles, int x, int y, int tile_size, int samples);
-    ~Tile();
-    void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
-    void renderThread(int image_width, int image_height, camera cam, hittable_list **world_ptr, int max_depth);
-    float4 *getPixels();
-};
-
-Tile::Tile(int id, Tile **tiles, int x, int y, int tile_size, int samples) {
-    this->id = id;
-    this->tiles = tiles;
-    this->x = x;
-    this->y = y;
-    this->tile_size = tile_size;
-    this->samples = samples;
-    this->pixel_array = (float4 *)malloc(tile_size * tile_size * sizeof(float4));
-}
-
-Tile::~Tile() {
-    free(pixel_array);
-}
-
-void Tile::render(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
-    m.lock();
-    while (true) {
-        if (threadStarted < 16 && ((tiles[id + 1] != NULL && tiles[id + 1]->started) || (x == 0 && y == 0))) {  // && ((tiles[id + 1] != NULL && tiles[id + 1]->started) || (x == 0 && y == 0))
-            threadStarted++;
-            m.unlock();
-            break;
-        } else {
-            m.unlock();
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-    }
-
-    started = true;
-    for (int s = 0; s < samples; ++s) {
-        for (int j = this->y; j < this->y + tile_size; ++j) {
-            for (int i = this->x; i < this->x + tile_size; ++i) {
-                int tile_x = i - this->x;
-                int tile_y = j - this->y;
-                int array_idx = tile_x + tile_y * tile_size;
-
-                float4 pixel_color = this->pixel_array[array_idx];
-                auto u = (i + random_float()) / (image_width - 1);
-                auto v = (j + random_float()) / (image_height - 1);
-                ray r = cam.get_ray(u, v);
-                color c = ray_color(r, world, max_depth);
-                float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
-                pixel_color = make_float4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
-                this->pixel_array[array_idx] = pixel_color;
-            }
-        }
-    }
-
-    this->done = true;
-    m.lock();
-    threadStarted--;
-    m.unlock();
-}
-
-void Tile::renderThread(int image_width, int image_height, camera cam, hittable_list **world_ptr, int max_depth) {
-    hittable_list world = **world_ptr;
-    std::thread thread(&Tile::render, this, image_width, image_height, cam, world, max_depth);
-    this->thread = std::move(thread);
-}
-
-float4 *Tile::getPixels() {
-    return this->pixel_array;
-}
-
-bool mergeTiles(sf::Uint8 *pixel_array, Tile **tiles, int nb_tiles, int tile_size, int image_height, int image_width, int samples) {
-    bool tempFinished = true;
-    for (int i = 0; i < nb_tiles; i++) {
-        Tile *t = tiles[i];
-
-        if (!t->started) {
-            tempFinished = false;
-            continue;  // If the tile hasn't started rendering it's doesn't make sense to try to merge it
-        }
-
-        int length = tile_size * tile_size;
-        // Index of final pixel array (size of final image)
-        int start_idx = t->x + (image_height - tile_size - t->y) * image_width;
-
-        float4 *pixels = t->getPixels();
-
-        for (int p = 0; p < length; p++) {
-            // bottom pixel line should go on top
-            int final_idx = (start_idx + p % tile_size) + (length - 1 - p) / tile_size * image_width;
-            // Ditch pixels that were calculated but are out of the image or if they're black
-            if (final_idx <= image_height * image_width && final_idx >= 0) {
-                if (pixels[p].w > 0) {
-                    auto r = pixels[p].x;
-                    auto g = pixels[p].y;
-                    auto b = pixels[p].z;
-
-                    // Divide the color by the number of samples and gamma-correct for gamma=2.0.
-                    auto scale = 1.0 / pixels[p].w;
-                    r = sqrt(scale * r);
-                    g = sqrt(scale * g);
-                    b = sqrt(scale * b);
-
-                    pixel_array[final_idx * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
-                    pixel_array[final_idx * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
-                    pixel_array[final_idx * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
-                    pixel_array[final_idx * 4 + 3] = 255u;
-                } else {
-                    tempFinished = false;
-                }
-            }
-        }
-    }
-
-    return tempFinished;
-}
-
-__global__ void renderCuda(float4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    const int j = blockIdx.y * blockDim.y + threadIdx.y;
-    // const int id = i + j * blockIdx.y * blockDim.y;
-
-    if (i < image_width && j < image_height) {
-        float4 pixel_color = make_float4(0, 0, 0, 0);
-        for (char s = 0; s < samples; s++) {
-            auto u = (i + random_float()) / (image_width - 1);
-            auto v = (j + random_float()) / (image_height - 1);
-            ray r = cam->get_ray(u, v);
-            color c = ray_color(r, **world_ptr, max_depth);
-            float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
-            pixel_color = make_float4(
-                c.x() + pixel_color.x,
-                c.y() + pixel_color.y,
-                c.z() + pixel_color.z,
-                s + 1);
-            pixels[i + j * image_width] = pixel_color;
-        }
-    }
-}
-
-bool convertPixels(float4 *gpuPixels, sf::Uint8 *sfml_pixels, int image_width, int image_height) {
-    bool finished = true;
-    for (int x = 0; x < image_width; x++) {
-        for (int y = 0; y < image_height; y++) {
-            int i = x + y * image_width;
-            float4 pixel = gpuPixels[x + (image_height - y - 1) * image_width];
-
-            if (pixel.w > 0) {
-                auto scale = 1.0 / pixel.w;
-                auto r = sqrt(scale * pixel.x);
-                auto g = sqrt(scale * pixel.y);
-                auto b = sqrt(scale * pixel.z);
-                sfml_pixels[i * 4 + 0] = 256 * clamp(r, 0.0, 0.999);
-                sfml_pixels[i * 4 + 1] = 256 * clamp(g, 0.0, 0.999);
-                sfml_pixels[i * 4 + 2] = 256 * clamp(b, 0.0, 0.999);
-                sfml_pixels[i * 4 + 3] = 255u;
-            } else {
-                finished = false;
-            }
-        }
-    }
-
-    return finished;
-}
-
 __host__ int main(int argc, char *argv[]) {
     srand(time(NULL));
 
@@ -307,16 +106,13 @@ __host__ int main(int argc, char *argv[]) {
     bool isCuda = strcmp(argv[1], "cuda") == 0;
 
     // Image
-    const auto aspect_ratio = 16.f / 9.f;
-    // const auto aspect_ratio = 1;
-    const int image_width = 800;
+    // const auto aspect_ratio = 16.f / 9.f;
+    const auto aspect_ratio = 1;
+    const int image_width = 320;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 15;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 10;
     const int tile_size = 32;
-
-    // World
-    // auto world = random_scene();
 
     // Camera
     point3 lookfrom(13, 2, 3);
@@ -353,7 +149,8 @@ __host__ int main(int argc, char *argv[]) {
     int total_tiles_y = (int)std::ceil((float)image_height / (float)tile_size);
     int total_tiles_y_pixels = total_tiles_y * tile_size;
     int nb_tiles = total_tiles_x * total_tiles_y;
-    Tile **tiles = (Tile **)malloc(nb_tiles * sizeof(Tile *));
+    Tile **tiles = (Tile **)malloc((nb_tiles + 1) * sizeof(Tile *));
+    tiles[nb_tiles] = NULL;  // Avoid segfault on render function
 
     // According to occupation calculator, 640 TPB is the optimal number.
     int grid_height = 20;
@@ -399,10 +196,9 @@ __host__ int main(int argc, char *argv[]) {
 
         printf("Random scene synchronize: %d\n", cudaDeviceSynchronize());
         renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
-        //printf("Render synchronize: %d\n", cudaDeviceSynchronize());
+        // printf("Render synchronize: %d\n", cudaDeviceSynchronize());
     } else {
         // Render
-
         std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
         std::cerr << "total_tiles_x: " << total_tiles_x << "\n";
         std::cerr << "total_tiles_y: " << total_tiles_y << "\n";
@@ -457,7 +253,6 @@ __host__ int main(int argc, char *argv[]) {
                 std::cerr << "Done render in " << iElaps << " seconds\n";
 
                 std::ofstream outfile;
-
                 outfile.open("result.txt", std::ios_base::app);  // append instead of overwrite
                 outfile << iElaps << ";" << image_width << ";" << image_height << ";" << grid_width << ";" << grid_height << ";" << samples_per_pixel << std::endl;
 

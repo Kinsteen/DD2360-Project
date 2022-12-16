@@ -30,6 +30,7 @@ set ( COMMON_ALL
   src/common/ray.h
   src/common/vec3.h
   src/common/cuda_utils.h
+  src/common/color.h
 )
 
 set ( SOURCE_ONE_WEEKEND
@@ -38,6 +39,8 @@ set ( SOURCE_ONE_WEEKEND
   src/InOneWeekend/hittable_list.h
   src/InOneWeekend/material.h
   src/InOneWeekend/sphere.h
+  src/InOneWeekend/render.h
+  src/InOneWeekend/render_gpu.h
 )
 
 # Executables
