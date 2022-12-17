@@ -106,12 +106,12 @@ __host__ int main(int argc, char *argv[]) {
     bool isCuda = strcmp(argv[1], "cuda") == 0;
 
     // Image
-    // const auto aspect_ratio = 16.f / 9.f;
-    const auto aspect_ratio = 1;
-    const int image_width = 320;
+    const auto aspect_ratio = 16.f / 9.f;
+    //const auto aspect_ratio = 1;
+    const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
-    const int max_depth = 10;
+    const int max_depth = 10; // 10 is virtually the same than 100+
     const int tile_size = 32;
 
     // Camera
@@ -153,7 +153,7 @@ __host__ int main(int argc, char *argv[]) {
     tiles[nb_tiles] = NULL;  // Avoid segfault on render function
 
     // According to occupation calculator, 640 TPB is the optimal number.
-    int grid_height = 20;
+    int grid_height = 32;
     int grid_width = 32;
 
     if (isCuda) {
@@ -162,7 +162,7 @@ __host__ int main(int argc, char *argv[]) {
         size_t stackSize;
         cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
         std::cerr << "GPU Stack size: " << stackSize << std::endl;
-        cudaDeviceSetLimit(cudaLimitStackSize, 65536);
+        //cudaDeviceSetLimit(cudaLimitStackSize, 65536);
         cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
         std::cerr << "GPU Stack size: " << stackSize << std::endl;
 

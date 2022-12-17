@@ -11,7 +11,7 @@ __global__ void renderCuda(float4 *pixels, int image_width, int image_height, in
             auto u = (i + random_float()) / (image_width - 1);
             auto v = (j + random_float()) / (image_height - 1);
             ray r = cam->get_ray(u, v);
-            color c = ray_color(r, **world_ptr, max_depth);
+            color c = ray_color_no_recur(r, **world_ptr, max_depth);
             float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
             pixel_color = make_float4(
                 c.x() + pixel_color.x,

@@ -42,3 +42,10 @@ Resolution: 800x450, 32x32: 4.62s average
 Resolution: 800x450, 20x32: 4.45s average (3.6% improvement)
 
 From here, each run creates a line in the result file, so that we can make the program run in a loop and get results.
+
+Removing recursion in ray_color makes code run way faster, around 40% faster!
+- CUDA, 30 samples, 1280x720, float: 13.8342 seconds (64% improvement)
+Seems like using 32x32 grid yields more perf?
+Recursion or not doesn't change anything when running on CPU
+
+Idea: use shared memory in each block for pixels instead of unified memory?
