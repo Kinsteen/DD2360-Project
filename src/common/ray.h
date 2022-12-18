@@ -40,29 +40,4 @@ class ray {
         float tm;
 };
 
-class ray_cuda {
-    public:
-        ray_cuda() {}
-        __host__ __device__ ray_cuda(const float3& origin, const float3& direction)
-            : orig(origin), dir(direction), tm(0)
-        {}
-
-        __host__ __device__ ray_cuda(const float3& origin, const float3& direction, float time)
-            : orig(origin), dir(direction), tm(time)
-        {}
-
-        __host__ __device__ float3 origin() const  { return orig; }
-        __host__ __device__ float3 direction() const { return dir; }
-        __host__ __device__ float time() const    { return tm; }
-
-        __host__ __device__ float3 at(float t) const {
-            return orig + t*dir;
-        }
-
-    public:
-        float3 orig;
-        float3 dir;
-        float tm;
-};
-
 #endif

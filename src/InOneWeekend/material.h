@@ -20,17 +20,9 @@ class material {
     __host__ __device__ virtual bool scatter(
         const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered) const = 0;
 
-    // void* operator new(size_t len) {
-    //     void* ptr;
-    //     cudaMallocManaged(&ptr, len);
-    //     cudaDeviceSynchronize();
-    //     return ptr;
-    // }
-
-    // void operator delete(void* ptr) {
-    //     cudaDeviceSynchronize();
-    //     cudaFree(ptr);
-    // }
+    __host__ __device__ virtual color emitted() const {
+        return color(0, 0, 0);
+    }
 };
 
 class lambertian : public material {
@@ -106,6 +98,23 @@ class dielectric : public material {
         r0 = r0 * r0;
         return r0 + (1 - r0) * pow((1 - cosine), 5);
     }
+};
+
+class diffuse_light : public material {
+   public:
+    __host__ __device__ diffuse_light(const color& c) : emit(c) {}
+
+    __host__ __device__ virtual bool scatter(
+        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered) const override {
+        return false;
+    }
+
+    __host__ __device__ virtual color emitted() const override {
+        return emit;
+    }
+
+   public:
+    color emit;
 };
 
 #endif

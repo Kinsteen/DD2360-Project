@@ -56,10 +56,14 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
             if ((center - point3(4, 0.2, 0)).length() > 0.9) {
                 material *sphere_material;
 
-                if (choose_mat < 0.8) {
+                if (choose_mat < 0.60) {
                     // diffuse
                     auto albedo = color::random() * color::random();
                     sphere_material = new lambertian(albedo);
+                    objects_array[idx++] = new sphere(center, 0.2, sphere_material);
+                } else if (choose_mat < 0.80) {
+                    float light_power = 4;
+                    sphere_material = new diffuse_light(color::random() * light_power);
                     objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 } else if (choose_mat < 0.95) {
                     // metal
@@ -84,6 +88,10 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
 
     auto material3 = new metal(color(0.7, 0.6, 0.5), 0.0);
     objects_array[idx++] = new sphere(point3(4, 1, 0), 1.0, material3);
+
+    // float light_power = 1;
+    // auto material4 = new diffuse_light(color(light_power, light_power, light_power));
+    // objects_array[idx++] = new sphere(point3(0, 1300, 0), 1000.0, material4);
 
     *world = new hittable_list(objects_array, idx);
 }
@@ -110,7 +118,7 @@ __host__ int main(int argc, char *argv[]) {
     //const auto aspect_ratio = 1;
     const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 1;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 10; // 10 is virtually the same than 100+
     const int tile_size = 32;
 
@@ -196,7 +204,6 @@ __host__ int main(int argc, char *argv[]) {
 
         printf("Random scene synchronize: %d\n", cudaDeviceSynchronize());
         renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
-        // printf("Render synchronize: %d\n", cudaDeviceSynchronize());
     } else {
         // Render
         std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
@@ -267,7 +274,7 @@ __host__ int main(int argc, char *argv[]) {
                 tex.copyToImage().saveToFile("render.png");
 
                 renderFinished = true;
-                exit(0);
+                // exit(0);
             }
 
             // Sleep to not update too often
