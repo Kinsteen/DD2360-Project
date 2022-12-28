@@ -16,11 +16,12 @@
 
 #include "hittable.h"
 #include "rtweekend.h"
+#include "sphere.h"
 
-class hittable_list : public hittable {
+class world {
    public:
-    __host__ __device__ hittable_list() {}
-    __host__ __device__ hittable_list(hittable** objects, int size) {
+    __host__ __device__ world() {}
+    __host__ __device__ world(sphere** objects, int size) {
         objects_array = objects;
         this->size = size;
     }
@@ -29,11 +30,11 @@ class hittable_list : public hittable {
         const ray& r, float t_min, float t_max, hit_record& rec);
 
    public:
-    hittable** objects_array;
+    sphere** objects_array;
     int size;
 };
 
-__host__ __device__ bool hittable_list::hit(const ray& r, float t_min, float t_max, hit_record& rec) {
+__host__ __device__ bool world::hit(const ray& r, float t_min, float t_max, hit_record& rec) {
     hit_record temp_rec;
     auto hit_anything = false;
     auto closest_so_far = t_max;
@@ -43,7 +44,6 @@ __host__ __device__ bool hittable_list::hit(const ray& r, float t_min, float t_m
             hit_anything = true;
             closest_so_far = temp_rec.t;
             rec = temp_rec;
-            return true;
         }
     }
 

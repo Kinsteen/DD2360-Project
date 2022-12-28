@@ -2,14 +2,14 @@
 #define RENDER_H
 
 // Common Render functions
-__host__ __device__ color ray_color_no_recur(const ray &r, hittable &world, int depth) {
+__host__ __device__ color ray_color_no_recur(const ray &r, world &m_world, int depth) {
     hit_record rec;
 
     ray current_ray = r;
     color current_attenuation = color(1.0, 1.0, 1.0);
 
     for (int i = depth; i >= 0; i--) {
-        if (world.hit(current_ray, 0.001, infinity, rec)) {
+        if (m_world.hit(current_ray, 0.001, infinity, rec)) {
             ray scattered;
             color attenuation;
             if (rec.mat_ptr->scatter(current_ray, rec, attenuation, scattered)) {

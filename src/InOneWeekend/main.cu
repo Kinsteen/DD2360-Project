@@ -39,7 +39,7 @@ double cpuSecond() {
     return ((double)tp.tv_sec + (double)tp.tv_usec * 1.e-6);
 }
 
-__host__ __device__ void random_scene(hittable_list **world, hittable **objects_array, int image_width, int image_height) {
+__host__ __device__ void random_scene(world **m_world, sphere **objects_array, int image_width, int image_height) {
 #ifdef __CUDA_ARCH__
     dev_image_height = image_height;
     dev_image_width = image_width;
@@ -95,15 +95,15 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
     // auto material4 = new diffuse_light(color(light_power, light_power, light_power));
     // objects_array[idx++] = new sphere(point3(0, 1300, 0), 1000.0, material4);
 
-    *world = new hittable_list(objects_array, idx);
+    *m_world = new world(objects_array, idx);
     printf("%d items in world\n", idx);
 }
 
 // We can't generate the scene on host because of the use of virtual functions in the hittable objects.
 // We need to do everything on the GPU
 // This function takes a pointer to a world, and the GPU will create all objects in the scene
-__global__ void random_scene_kernel(hittable_list **world, hittable **objects_array, int image_width, int image_height) {
-    random_scene(world, objects_array, image_width, image_height);
+__global__ void random_scene_kernel(world **m_world, sphere **objects_array, int image_width, int image_height) {
+    random_scene(m_world, objects_array, image_width, image_height);
 }
 
 __host__ int main(int argc, char *argv[]) {
@@ -120,10 +120,10 @@ __host__ int main(int argc, char *argv[]) {
 
     // Image
     const auto aspect_ratio = 16.f / 9.f;
-    // const auto aspect_ratio = 1;
-    const int image_width = 1280;
+    //const auto aspect_ratio = 1;
+    const int image_width = 200;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 1;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 8;          // 10 is virtually the same than 100+
     const int tile_size = 32;
 
@@ -167,7 +167,7 @@ __host__ int main(int argc, char *argv[]) {
 
     // According to occupation calculator, 640 TPB is the optimal number.
     int grid_height = 32;
-    int grid_width = 32;
+    int grid_width = 20;
 
     std::thread thread_object;
 
@@ -198,20 +198,20 @@ __host__ int main(int argc, char *argv[]) {
 
         printf("Init random synchronize: %d\n", cudaDeviceSynchronize());
 
-        hittable_list **world;
-        cudaMalloc(&world, sizeof(hittable_list *));
+        world **dev_world;
+        cudaMalloc(&dev_world, sizeof(world *));
 
-        hittable **objects_array;
-        cudaMalloc(&objects_array, 1000 * sizeof(hittable *));
+        sphere **objects_array;
+        cudaMalloc(&objects_array, 1000 * sizeof(sphere *));
 
-        random_scene_kernel<<<1, 1>>>(world, objects_array, image_width, image_height);
+        random_scene_kernel<<<1, 1>>>(dev_world, objects_array, image_width, image_height);
 
         printf("Random scene synchronize: %d\n", cudaDeviceSynchronize());
 
         if (isInfinite) {
-            auto f = [grid_x, grid_y, grid_width, grid_height, pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth]() {
+            auto f = [grid_x, grid_y, grid_width, grid_height, pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth]() {
                 for (int i = 0; i < 10000; i++) {
-                    renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, 1, dev_cam, world, max_depth);
+                    renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, 1, dev_cam, dev_world, max_depth);
                     cudaDeviceSynchronize();
                     printf("Sample %d\n", i);
                 }
@@ -219,8 +219,8 @@ __host__ int main(int argc, char *argv[]) {
 
             thread_object = std::thread(f);
         } else {
-            renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
-            // cudaDeviceSynchronize();
+            renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
+            //cudaDeviceSynchronize();
         }
     } else {
         // Render
@@ -231,8 +231,8 @@ __host__ int main(int argc, char *argv[]) {
         std::cerr << "Sample size: " << samples_per_pixel << "\n";
 
         // Render each tile
-        hittable_list **world_cpu = (hittable_list **)malloc(sizeof(hittable_list *));
-        hittable **objects_array_cpu = (hittable **)malloc(5000 * sizeof(hittable *));
+        world **world_cpu = (world **)malloc(sizeof(world *));
+        sphere **objects_array_cpu = (sphere **)malloc(5000 * sizeof(sphere *));
         random_scene(world_cpu, objects_array_cpu, image_width, image_height);
         m.lock();
         for (int i = nb_tiles - 1; i >= 0; i--) {
@@ -296,8 +296,8 @@ __host__ int main(int argc, char *argv[]) {
 
             // Sleep to not update too often
             // 10% performance hit with 720p 5 samples on CPU
-            // 6% performance hit with 1600p on GPU
-            sf::sleep(sf::milliseconds(100));
+            // 1.10-1.15x faster if no update at all
+            sf::sleep(sf::milliseconds(50));
         } else {
             // double iElaps = cpuSecond() - iStart;
 

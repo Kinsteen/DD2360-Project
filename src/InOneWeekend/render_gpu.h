@@ -1,7 +1,7 @@
 #ifndef RENDER_GPU_H
 #define RENDER_GPU_H
 
-__global__ void renderCuda(float4 *pixels, int image_width, int image_height, int samples, camera *cam, hittable_list **world_ptr, int max_depth) {
+__global__ void renderCuda(float4 *pixels, int image_width, int image_height, int samples, camera *cam, world **world_ptr, int max_depth) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
 

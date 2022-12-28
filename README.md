@@ -51,3 +51,5 @@ Recursion or not doesn't change anything when running on CPU
 Idea: use shared memory in each block for pixels instead of unified memory?
 
 Performance is linear with items in scene: 30 objects -> 1.9s, 300 objects -> 17.7s.
+
+Removing virtual functions (world/spheres) was 3.54x faster (there's still materials which uses virtual classes)

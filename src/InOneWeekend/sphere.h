@@ -16,7 +16,7 @@
 #include "hittable.h"
 
 
-class sphere : public hittable {
+class sphere {
     public:
         __host__ __device__ sphere() {}
 
@@ -29,18 +29,6 @@ class sphere : public hittable {
         __host__ __device__ void whoami() {
             printf("Sphere!\n");
         }
-
-    // void* operator new(size_t len) {
-    //     void* ptr;
-    //     cudaMallocManaged(&ptr, len);
-    //     cudaDeviceSynchronize();
-    //     return ptr;
-    // }
-
-    // void operator delete(void* ptr) {
-    //     cudaDeviceSynchronize();
-    //     cudaFree(ptr);
-    // }
 
     public:
         point3 center;

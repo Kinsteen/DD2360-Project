@@ -21,8 +21,8 @@ class Tile {
 
     Tile(int id, Tile **tiles, int x, int y, int tile_size, int samples);
     ~Tile();
-    void render(int image_width, int image_height, camera cam, hittable_list world, int max_depth);
-    void renderThread(int image_width, int image_height, camera cam, hittable_list **world_ptr, int max_depth);
+    void render(int image_width, int image_height, camera cam, world world, int max_depth);
+    void renderThread(int image_width, int image_height, camera cam, world **world_ptr, int max_depth);
     float4 *getPixels();
 };
 
@@ -40,7 +40,7 @@ Tile::~Tile() {
     free(pixel_array);
 }
 
-void Tile::render(int image_width, int image_height, camera cam, hittable_list world, int max_depth) {
+void Tile::render(int image_width, int image_height, camera cam, world m_world, int max_depth) {
     m.lock();
     while (true) {
         if (threadStarted < 16 && ((tiles[id + 1] != NULL && tiles[id + 1]->started) || (x == 0 && y == 0))) {
@@ -65,7 +65,7 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
                 auto u = (i + random_float()) / (image_width - 1);
                 auto v = (j + random_float()) / (image_height - 1);
                 ray r = cam.get_ray(u, v);
-                color c = ray_color_no_recur(r, world, max_depth);
+                color c = ray_color_no_recur(r, m_world, max_depth);
                 float4 new_color = make_float4(c.x(), c.y(), c.z(), s);
                 pixel_color = make_float4(c.x() + pixel_color.x, c.y() + pixel_color.y, c.z() + pixel_color.z, s);
                 this->pixel_array[array_idx] = pixel_color;
@@ -79,8 +79,8 @@ void Tile::render(int image_width, int image_height, camera cam, hittable_list w
     m.unlock();
 }
 
-void Tile::renderThread(int image_width, int image_height, camera cam, hittable_list **world_ptr, int max_depth) {
-    hittable_list world = **world_ptr;
+void Tile::renderThread(int image_width, int image_height, camera cam, world **world_ptr, int max_depth) {
+    world world = **world_ptr;
     std::thread thread(&Tile::render, this, image_width, image_height, cam, world, max_depth);
     this->thread = std::move(thread);
 }
