@@ -22,7 +22,7 @@ set ( CMAKE_CUDA_ARCHITECTURES 86 )
 
 set ( CMAKE_BUILD_TYPE Debug )
 
-add_compile_options ( -lineinfo -rdynamic -O3 )
+add_compile_options ( -lineinfo -rdynamic -O3 -maxrregcount=64 )
 
 # Source
 set ( COMMON_ALL

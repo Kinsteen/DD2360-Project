@@ -121,9 +121,9 @@ __host__ int main(int argc, char *argv[]) {
     // Image
     const auto aspect_ratio = 16.f / 9.f;
     //const auto aspect_ratio = 1;
-    const int image_width = 200;
+    const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 1;  // 3 samples is the minimum to have a correct contrast / colors
+    const int samples_per_pixel = 1000;  // 3 samples is the minimum to have a correct contrast / colors
     const int max_depth = 8;          // 10 is virtually the same than 100+
     const int tile_size = 32;
 
@@ -166,8 +166,8 @@ __host__ int main(int argc, char *argv[]) {
     tiles[nb_tiles] = NULL;  // Avoid segfault on render function
 
     // According to occupation calculator, 640 TPB is the optimal number.
-    int grid_height = 32;
-    int grid_width = 20;
+    int grid_height = 16;
+    int grid_width = 16;
 
     std::thread thread_object;
 
@@ -211,16 +211,19 @@ __host__ int main(int argc, char *argv[]) {
         if (isInfinite) {
             auto f = [grid_x, grid_y, grid_width, grid_height, pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth]() {
                 for (int i = 0; i < 10000; i++) {
+                    double cudaTime = cpuSecond();
                     renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, 1, dev_cam, dev_world, max_depth);
                     cudaDeviceSynchronize();
-                    printf("Sample %d\n", i);
+                    printf("Sample %d done, time: %f\n", i, cpuSecond() - cudaTime);
                 }
             };
 
             thread_object = std::thread(f);
         } else {
+            double cudaTime = cpuSecond();
             renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
             //cudaDeviceSynchronize();
+            printf("kernel time: %f\n", cpuSecond() - cudaTime);
         }
     } else {
         // Render

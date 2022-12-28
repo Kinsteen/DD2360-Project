@@ -53,3 +53,8 @@ Idea: use shared memory in each block for pixels instead of unified memory?
 Performance is linear with items in scene: 30 objects -> 1.9s, 300 objects -> 17.7s.
 
 Removing virtual functions (world/spheres) was 3.54x faster (there's still materials which uses virtual classes)
+
+Registers per thread were 119, which limited 512 threads per block
+25.0s with 16x16 blocks and no registers limit
+maxrregcount=64 reduces the render time a lot (12.0s with 32x32, 10s with 16x16)
+maxrregcount=40 is too low (16.3s)
