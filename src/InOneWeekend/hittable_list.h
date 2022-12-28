@@ -43,6 +43,7 @@ __host__ __device__ bool hittable_list::hit(const ray& r, float t_min, float t_m
             hit_anything = true;
             closest_so_far = temp_rec.t;
             rec = temp_rec;
+            return true;
         }
     }
 

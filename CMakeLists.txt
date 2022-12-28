@@ -21,7 +21,8 @@ set ( CMAKE_CXX_STANDARD 11 )
 set ( CMAKE_CUDA_ARCHITECTURES 86 )
 
 set ( CMAKE_BUILD_TYPE Debug )
-add_compile_options ( -lineinfo -rdynamic )
+
+add_compile_options ( -lineinfo -rdynamic -O3 )
 
 # Source
 set ( COMMON_ALL

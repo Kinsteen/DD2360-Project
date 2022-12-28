@@ -53,7 +53,7 @@ __global__ void init_random_cuda(int image_width, int image_height) {
     if ((i >= image_width) || (j >= image_height)) return;
 
     int pixel_index = j * image_width + i;
-    curand_init(clock64()+pixel_index, 0, 0, &dev_states[pixel_index]);
+    curand_init(pixel_index, 0, 0, &dev_states[pixel_index]);
 }
 
 __host__ __device__ inline float random_float() {

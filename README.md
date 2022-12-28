@@ -49,3 +49,5 @@ Seems like using 32x32 grid yields more perf?
 Recursion or not doesn't change anything when running on CPU
 
 Idea: use shared memory in each block for pixels instead of unified memory?
+
+Performance is linear with items in scene: 30 objects -> 1.9s, 300 objects -> 17.7s.

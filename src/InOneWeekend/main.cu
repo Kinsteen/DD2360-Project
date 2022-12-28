@@ -31,6 +31,8 @@
 #include "rtweekend.h"
 #include "sphere.h"
 
+bool renderFinished = false;
+
 double cpuSecond() {
     struct timeval tp;
     gettimeofday(&tp, NULL);
@@ -56,12 +58,12 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
             if ((center - point3(4, 0.2, 0)).length() > 0.9) {
                 material *sphere_material;
 
-                if (choose_mat < 0.60) {
+                if (choose_mat < 0.80) {
                     // diffuse
                     auto albedo = color::random() * color::random();
                     sphere_material = new lambertian(albedo);
                     objects_array[idx++] = new sphere(center, 0.2, sphere_material);
-                } else if (choose_mat < 0.80) {
+                } else if (choose_mat < 0.90) {
                     float light_power = 4;
                     sphere_material = new diffuse_light(color::random() * light_power);
                     objects_array[idx++] = new sphere(center, 0.2, sphere_material);
@@ -94,6 +96,7 @@ __host__ __device__ void random_scene(hittable_list **world, hittable **objects_
     // objects_array[idx++] = new sphere(point3(0, 1300, 0), 1000.0, material4);
 
     *world = new hittable_list(objects_array, idx);
+    printf("%d items in world\n", idx);
 }
 
 // We can't generate the scene on host because of the use of virtual functions in the hittable objects.
@@ -112,14 +115,16 @@ __host__ int main(int argc, char *argv[]) {
     }
 
     bool isCuda = strcmp(argv[1], "cuda") == 0;
+    bool isInfinite = false;
+    if (argc >= 3 && (strcmp(argv[2], "inf") == 0)) isInfinite = true;
 
     // Image
     const auto aspect_ratio = 16.f / 9.f;
-    //const auto aspect_ratio = 1;
+    // const auto aspect_ratio = 1;
     const int image_width = 1280;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 1;  // 3 samples is the minimum to have a correct contrast / colors
-    const int max_depth = 10; // 10 is virtually the same than 100+
+    const int samples_per_pixel = 10;  // 3 samples is the minimum to have a correct contrast / colors
+    const int max_depth = 8;          // 10 is virtually the same than 100+
     const int tile_size = 32;
 
     // Camera
@@ -127,7 +132,7 @@ __host__ int main(int argc, char *argv[]) {
     point3 lookat(0, 0, 0);
     vec3 vup(0, 1, 0);
     auto dist_to_focus = 10.0;
-    auto aperture = 0.1;
+    auto aperture = 0.000001;
 
     camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
 
@@ -164,15 +169,14 @@ __host__ int main(int argc, char *argv[]) {
     int grid_height = 32;
     int grid_width = 32;
 
+    std::thread thread_object;
+
     if (isCuda) {
         // Increase the stack size
-        // Can be removed if we remove recursions in kernels
         size_t stackSize;
         cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
         std::cerr << "GPU Stack size: " << stackSize << std::endl;
-        //cudaDeviceSetLimit(cudaLimitStackSize, 65536);
-        cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
-        std::cerr << "GPU Stack size: " << stackSize << std::endl;
+        // cudaDeviceSetLimit(cudaLimitStackSize, 65536);
 
         int grid_x = ceil(image_width / (float)grid_width) + 1;
         int grid_y = ceil(image_height / (float)grid_height) + 1;
@@ -195,15 +199,29 @@ __host__ int main(int argc, char *argv[]) {
         printf("Init random synchronize: %d\n", cudaDeviceSynchronize());
 
         hittable_list **world;
-        cudaMallocManaged(&world, sizeof(hittable_list *));
+        cudaMalloc(&world, sizeof(hittable_list *));
 
         hittable **objects_array;
-        cudaMallocManaged(&objects_array, 1000 * sizeof(hittable *));
+        cudaMalloc(&objects_array, 1000 * sizeof(hittable *));
 
         random_scene_kernel<<<1, 1>>>(world, objects_array, image_width, image_height);
 
         printf("Random scene synchronize: %d\n", cudaDeviceSynchronize());
-        renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
+
+        if (isInfinite) {
+            auto f = [grid_x, grid_y, grid_width, grid_height, pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth]() {
+                for (int i = 0; i < 10000; i++) {
+                    renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, 1, dev_cam, world, max_depth);
+                    cudaDeviceSynchronize();
+                    printf("Sample %d\n", i);
+                }
+            };
+
+            thread_object = std::thread(f);
+        } else {
+            renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, world, max_depth);
+            // cudaDeviceSynchronize();
+        }
     } else {
         // Render
         std::cerr << "Image size: " << image_width << "x" << image_height << "\n";
@@ -231,8 +249,6 @@ __host__ int main(int argc, char *argv[]) {
     memset(pixel_array_sfml, 0, image_width * image_height * 4 * sizeof(sf::Uint8));
     tex.update(pixel_array_sfml);
 
-    bool renderFinished = false;
-
     while (window.isOpen()) {
         sf::Event event;
 
@@ -243,7 +259,7 @@ __host__ int main(int argc, char *argv[]) {
 
             bool tempFinished;
             if (isCuda) {
-                tempFinished = convertPixels(pixels, pixel_array_sfml, image_width, image_height);
+                tempFinished = convertPixels(pixels, pixel_array_sfml, image_width, image_height, samples_per_pixel);
             } else {
                 tempFinished = mergeTiles(pixel_array_sfml, tiles, nb_tiles, tile_size, image_height, image_width, samples_per_pixel);
             }
@@ -254,7 +270,7 @@ __host__ int main(int argc, char *argv[]) {
             window.draw(sprite);
             window.display();
 
-            if (tempFinished) {
+            if (tempFinished && !isInfinite) {
                 double iElaps = cpuSecond() - iStart;
 
                 std::cerr << "Done render in " << iElaps << " seconds\n";
@@ -274,7 +290,8 @@ __host__ int main(int argc, char *argv[]) {
                 tex.copyToImage().saveToFile("render.png");
 
                 renderFinished = true;
-                // exit(0);
+                if (isInfinite) thread_object.join();
+                exit(0);
             }
 
             // Sleep to not update too often
@@ -282,6 +299,9 @@ __host__ int main(int argc, char *argv[]) {
             // 6% performance hit with 1600p on GPU
             sf::sleep(sf::milliseconds(100));
         } else {
+            // double iElaps = cpuSecond() - iStart;
+
+            // std::cerr << "Done render in " << iElaps << " seconds\n"; // 15s
             window.waitEvent(event);
             if (event.type == sf::Event::Closed) window.close();
         }
