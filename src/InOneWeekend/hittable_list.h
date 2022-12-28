@@ -26,7 +26,7 @@ class world {
         this->size = size;
     }
 
-    __host__ __device__ virtual bool hit(
+    __host__ __device__ bool hit(
         const ray& r, float t_min, float t_max, hit_record& rec);
 
    public:

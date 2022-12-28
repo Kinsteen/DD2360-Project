@@ -28,9 +28,4 @@ struct hit_record {
     }
 };
 
-class hittable {
-   public:
-    __host__ __device__ virtual bool hit(const ray& r, float t_min, float t_max, hit_record& rec) = 0;
-};
-
 #endif
