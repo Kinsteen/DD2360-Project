@@ -64,7 +64,7 @@ __host__ __device__ void random_scene(world **m_world, sphere **objects_array, i
                     sphere_material = new lambertian(albedo);
                     objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 } else if (choose_mat < 0.90) {
-                    float light_power = 4;
+                    float light_power = 8;
                     sphere_material = new diffuse_light(color::random() * light_power);
                     objects_array[idx++] = new sphere(center, 0.2, sphere_material);
                 } else if (choose_mat < 0.95) {
@@ -120,11 +120,11 @@ __host__ int main(int argc, char *argv[]) {
 
     // Image
     const auto aspect_ratio = 16.f / 9.f;
-    //const auto aspect_ratio = 1;
-    const int image_width = 1280;
+    // const auto aspect_ratio = 1;
+    const int image_width = 1600;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 1000;  // 3 samples is the minimum to have a correct contrast / colors
-    const int max_depth = 8;          // 10 is virtually the same than 100+
+    const int samples_per_pixel = 500;  // 3 samples is the minimum to have a correct contrast / colors
+    const int max_depth = 8;          // 8 is virtually the same than 100+
     const int tile_size = 32;
 
     // Camera
@@ -132,7 +132,7 @@ __host__ int main(int argc, char *argv[]) {
     point3 lookat(0, 0, 0);
     vec3 vup(0, 1, 0);
     auto dist_to_focus = 10.0;
-    auto aperture = 0.000001;
+    auto aperture = 0.1;
 
     camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
 
@@ -169,14 +169,16 @@ __host__ int main(int argc, char *argv[]) {
     int grid_height = 16;
     int grid_width = 16;
 
+    std::cerr << "Threads per block: " << grid_height * grid_width << std::endl;
+
     std::thread thread_object;
 
     if (isCuda) {
         // Increase the stack size
-        size_t stackSize;
-        cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
-        std::cerr << "GPU Stack size: " << stackSize << std::endl;
-        // cudaDeviceSetLimit(cudaLimitStackSize, 65536);
+        // size_t stackSize;
+        // cudaDeviceGetLimit(&stackSize, cudaLimitStackSize);
+        // std::cerr << "GPU Stack size: " << stackSize << std::endl;
+        // cudaDeviceSetLimit(cudaLimitStackSize, 1048576);
 
         int grid_x = ceil(image_width / (float)grid_width) + 1;
         int grid_y = ceil(image_height / (float)grid_height) + 1;
@@ -193,7 +195,9 @@ __host__ int main(int argc, char *argv[]) {
 
         curandState *curandStates = NULL;
         cudaMalloc(&curandStates, grid_x * grid_y * grid_width * grid_height * sizeof(curandState));
+        // Will set the device random states
         init_rand<<<1, 1>>>(curandStates);
+        // Will init all threads to a random state
         init_random_cuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(image_width, image_height);
 
         printf("Init random synchronize: %d\n", cudaDeviceSynchronize());
@@ -222,8 +226,13 @@ __host__ int main(int argc, char *argv[]) {
         } else {
             double cudaTime = cpuSecond();
             renderCuda<<<dim3(grid_x, grid_y), dim3(grid_width, grid_height)>>>(pixels, image_width, image_height, samples_per_pixel, dev_cam, dev_world, max_depth);
-            //cudaDeviceSynchronize();
-            printf("kernel time: %f\n", cpuSecond() - cudaTime);
+            // cudaDeviceSynchronize();
+            // double doneCuda = cpuSecond() - cudaTime;
+            // printf("Done kernel in %f\n", doneCuda);
+            // std::ofstream outfile;
+            // outfile.open("result.txt", std::ios_base::app);  // append instead of overwrite
+            // outfile << doneCuda << ";" << image_width << ";" << image_height << ";" << grid_width << ";" << grid_height << ";" << samples_per_pixel << std::endl;
+            // exit(0);
         }
     } else {
         // Render
@@ -294,7 +303,7 @@ __host__ int main(int argc, char *argv[]) {
 
                 renderFinished = true;
                 if (isInfinite) thread_object.join();
-                exit(0);
+                // exit(0); // Exit when the render is done (useful for benchmarks)
             }
 
             // Sleep to not update too often

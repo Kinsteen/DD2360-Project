@@ -22,7 +22,7 @@ set ( CMAKE_CUDA_ARCHITECTURES 86 )
 
 set ( CMAKE_BUILD_TYPE Debug )
 
-add_compile_options ( -lineinfo -rdynamic -O3 -maxrregcount=64 )
+add_compile_options ( -lineinfo -O3 -maxrregcount=64 -use_fast_math -dc )
 
 # Source
 set ( COMMON_ALL
@@ -49,5 +49,6 @@ add_executable(inOneWeekend      ${SOURCE_ONE_WEEKEND} src/InOneWeekend/main.cu)
 # add_executable(test      ${SOURCE_ONE_WEEKEND}  src/InOneWeekend/test.cu)
 target_link_libraries(inOneWeekend PRIVATE sfml-graphics)
 # target_link_libraries(test PRIVATE sfml-graphics)
+set_target_properties(inOneWeekend PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 include_directories(src/common)
