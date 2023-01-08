@@ -1,5 +1,14 @@
 # DD2360 Final Project: Ray tracing in a weekend (but parallelized)
 
+## To compile
+CMake and SFML is needed.
+
+```
+cmake .
+make
+./inOneWeekend cuda
+```
+
 ## Multi threaded version
 Divide the image into smaller tiles (32x32 for example), and launch one thread per core to render a single tile. When a thread finishes, create a new one with another position. Repeat until image is done.
 
